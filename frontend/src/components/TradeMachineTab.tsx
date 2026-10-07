@@ -144,6 +144,8 @@ export default function TradeMachineTab() {
     }
   };
 
+  const isTradeDeadline = settings?.current_stage === 'TRADE_DEADLINE';
+
   if (loading) return (
     <div className="p-8 h-full flex flex-col items-center justify-center text-[#8e8e93]">
       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#3390ec] mb-4"></div>
@@ -161,6 +163,13 @@ export default function TradeMachineTab() {
           Офферы лиги
         </button>
       </div>
+
+      {isTradeDeadline && (
+        <div className="p-4 bg-[#ff3b30]/10 border-b border-[#ff3b30]/20 text-[#ff3b30] text-[13px] font-bold text-center flex flex-col items-center gap-1 shadow-sm">
+          <span className="text-[16px]">🔒</span>
+          Трейд-дедлайн наступил! Обмены заморожены до старта межсезонья.
+        </div>
+      )}
 
       <div className="p-4">
         {subTab === 'BUILDER' && (
@@ -185,14 +194,17 @@ export default function TradeMachineTab() {
               <div className="flex-1 space-y-2">
                 <div className="font-bold text-center border-b border-[#303030] pb-2 text-[13px]">Отдаем</div>
                 <div className="h-[250px] overflow-y-auto space-y-1 pr-1">
-                  {(myTeam?.players || []).map((p: any) => (
-                    <div key={p.id} onClick={() => toggleSet(selectedMyPlayers, p.id, setSelectedMyPlayers)} className={`p-2 rounded-lg border text-[12px] cursor-pointer ${selectedMyPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
-                      <div className="font-bold">{p.name}</div>
-                      <div className="text-[#8e8e93]">{formatMoney(p.salary)}</div>
-                    </div>
-                  ))}
+                  {(myTeam?.players || []).map((p: any) => {
+                    const restricted = p.is_trade_restricted;
+                    return (
+                      <div key={p.id} onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedMyPlayers, p.id, setSelectedMyPlayers)} className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
+                        <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
+                        <div className="text-[#8e8e93]">{formatMoney(p.salary)}</div>
+                      </div>
+                    );
+                  })}
                   {(myTeam?.current_picks || myTeam?.currentPicks || []).map((p: any) => (
-                    <div key={p.id} onClick={() => toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} className={`p-2 rounded-lg border text-[12px] cursor-pointer ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
+                    <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
                       <div className="font-bold">Пик {p.year} R{p.round}</div>
                     </div>
                   ))}
@@ -212,14 +224,17 @@ export default function TradeMachineTab() {
               <div className="flex-1 space-y-2">
                 <div className="font-bold text-center border-b border-[#303030] pb-2 text-[13px]">Получаем</div>
                 <div className="h-[250px] overflow-y-auto space-y-1 pr-1">
-                  {(partnerTeam?.players || []).map((p: any) => (
-                    <div key={p.id} onClick={() => toggleSet(selectedPartnerPlayers, p.id, setSelectedPartnerPlayers)} className={`p-2 rounded-lg border text-[12px] cursor-pointer ${selectedPartnerPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
-                      <div className="font-bold">{p.name}</div>
-                      <div className="text-[#8e8e93]">{formatMoney(p.salary)}</div>
-                    </div>
-                  ))}
+                  {(partnerTeam?.players || []).map((p: any) => {
+                    const restricted = p.is_trade_restricted;
+                    return (
+                      <div key={p.id} onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedPartnerPlayers, p.id, setSelectedPartnerPlayers)} className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
+                        <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
+                        <div className="text-[#8e8e93]">{formatMoney(p.salary)}</div>
+                      </div>
+                    );
+                  })}
                   {(partnerTeam?.current_picks || partnerTeam?.currentPicks || []).map((p: any) => (
-                    <div key={p.id} onClick={() => toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} className={`p-2 rounded-lg border text-[12px] cursor-pointer ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
+                    <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
                       <div className="font-bold">Пик {p.year} R{p.round}</div>
                     </div>
                   ))}
@@ -240,14 +255,15 @@ export default function TradeMachineTab() {
               <textarea 
                 value={message} onChange={e => setMessage(e.target.value)}
                 placeholder="Комментарий к офферу (опционально)..."
-                className="w-full p-3 bg-[#212121] border border-[#303030] rounded-xl text-[13px] text-white outline-none mb-3 resize-none h-[80px]"
+                disabled={isTradeDeadline}
+                className="w-full p-3 bg-[#212121] border border-[#303030] rounded-xl text-[13px] text-white outline-none mb-3 resize-none h-[80px] disabled:opacity-50"
               />
               <button 
                 onClick={handleSendOffer}
-                disabled={!isValid || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)}
-                className={`w-full py-3.5 rounded-xl font-bold transition-transform ${(!isValid || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)) ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#3390ec] text-white hover:bg-[#2b7bc4] active:scale-[0.98]'}`}
+                disabled={!isValid || isTradeDeadline || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)}
+                className={`w-full py-3.5 rounded-xl font-bold transition-transform ${(!isValid || isTradeDeadline || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)) ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#3390ec] text-white hover:bg-[#2b7bc4] active:scale-[0.98]'}`}
               >
-                Отправить оффер
+                {isTradeDeadline ? 'Обмены заморожены' : 'Отправить оффер'}
               </button>
             </div>
           </div>
@@ -265,6 +281,7 @@ export default function TradeMachineTab() {
                   allPlayers={safeTeamsArray.flatMap((t: any) => t.players || [])} 
                   allPicks={safeTeamsArray.flatMap((t: any) => t.currentPicks || t.current_picks || [])}
                   respondToOffer={respondToOffer} 
+                  isTradeDeadline={isTradeDeadline}
                 />
               ))
             )}
@@ -275,7 +292,7 @@ export default function TradeMachineTab() {
   );
 }
 
-function OfferCard({ offer, allPlayers, allPicks, respondToOffer }: any) {
+function OfferCard({ offer, allPlayers, allPicks, respondToOffer, isTradeDeadline }: any) {
   const [expanded, setExpanded] = useState(offer.status === 'PENDING');
 
   const getP = (id: string) => allPlayers.find((p: any) => p.id === id) || { name: 'Неизвестный игрок', overall_rating: 0, salary: 0 };
@@ -424,7 +441,13 @@ function OfferCard({ offer, allPlayers, allPicks, respondToOffer }: any) {
           
           {offer.status === 'PENDING' && (
             <div className="flex gap-2 mt-4 pt-4 border-t border-[#303030]">
-              <button onClick={(e) => { e.stopPropagation(); respondToOffer(offer.id, 'ACCEPT'); }} className="flex-1 py-3 bg-[#34c759] text-white font-bold rounded-xl text-[13px] hover:bg-[#2eb050] active:scale-[0.98] transition-transform">Принять</button>
+              <button 
+                disabled={isTradeDeadline}
+                onClick={(e) => { e.stopPropagation(); respondToOffer(offer.id, 'ACCEPT'); }} 
+                className={`flex-1 py-3 font-bold rounded-xl text-[13px] transition-transform ${isTradeDeadline ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#34c759] text-white hover:bg-[#2eb050] active:scale-[0.98]'}`}
+              >
+                {isTradeDeadline ? 'Дедлайн истек' : 'Принять'}
+              </button>
               <button onClick={(e) => { e.stopPropagation(); respondToOffer(offer.id, 'REJECT'); }} className="flex-1 py-3 bg-[#ff3b30]/10 text-[#ff3b30] font-bold rounded-xl text-[13px] hover:bg-[#ff3b30]/20 active:scale-[0.98] transition-transform">Отклонить</button>
             </div>
           )}

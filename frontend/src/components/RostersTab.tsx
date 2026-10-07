@@ -289,8 +289,13 @@ export default function RostersTab({ role }: { role: string }) {
                   
                   <div className="flex items-center gap-1.5 shrink-0">
                     {(p.option_type === 'PLAYER_OPTION' || p.option_type === 'TEAM_OPTION') && (
-                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-[#ff9f0a]/20 text-[#ff9f0a] mr-2">
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-[#ff9f0a]/20 text-[#ff9f0a] mr-2 shrink-0">
                         ⚠️ {p.option_type === 'PLAYER_OPTION' ? 'PO' : 'TO'}
+                      </span>
+                    )}
+                    {p.is_trade_restricted && (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-[#ff3b30]/20 text-[#ff3b30] mr-2 shrink-0" title="Мораторий на обмен (2 мес)">
+                        🔒 Мораторий
                       </span>
                     )}
                     {role === 'ADMIN' && (

@@ -28,6 +28,7 @@ model Team {
   owner          User?    @relation(fields: [owner_id], references: [id])
 
   players        Player[]
+  contract_offers ContractOffer[]
   
   original_picks DraftPick[] @relation("OriginalTeamPicks")
   current_picks  DraftPick[] @relation("CurrentTeamPicks")
@@ -53,17 +54,52 @@ model Player {
   team                Team?    @relation(fields: [team_id], references: [id])
   previous_team_id    String?
 
+  is_prospect         Boolean  @default(false)
+  is_trade_restricted Boolean  @default(false)
+  is_rfa              Boolean  @default(false)
+  fa_block            Int      @default(1)
+
   free_agency_lots    FreeAgencyLot[]
+  contract_offers     ContractOffer[]
+}
+
+model ContractOffer {
+  id            String   @id @default(uuid())
+  player_id     String
+  player        Player   @relation(fields: [player_id], references: [id])
+  team_id       String
+  team          Team     @relation(fields: [team_id], references: [id])
+  years         Int      @default(1)
+  annual_salary Float
+  salaries      Float[]
+  status        String   @default("PENDING")
+  created_at    DateTime @default(now())
 }
 
 model LeagueSettings {
-  id            Int   @id @default(1)
-  soft_cap      Float @default(140.0)
-  luxury_tax    Float @default(170.0)
-  first_apron   Float @default(178.0)
-  second_apron  Float @default(189.0)
-  hard_cap      Float @default(200.0)
-  current_stage String @default("REGULAR_SEASON")
+  id                     Int     @id @default(1)
+  soft_cap               Float   @default(140.0)
+  luxury_tax             Float   @default(170.0)
+  first_apron            Float   @default(178.0)
+  second_apron           Float   @default(189.0)
+  hard_cap               Float   @default(200.0)
+  current_stage          String  @default("REGULAR_SEASON")
+  
+  draft_order_approved   Boolean @default(false)
+  current_draft_pick_index Int   @default(0)
+  draft_is_completed     Boolean @default(false)
+
+  min_salary_schedule    Float[]
+  tax_mle_schedule       Float[]
+  full_mle_schedule      Float[]
+  rookie_max_schedule    Float[]
+  medium_max_schedule    Float[]
+  veteran_max_schedule   Float[]
+  supermax_schedule      Float[]
+
+  approved_fa_blocks     Int[]    @default([])
+  current_block_deadline DateTime?
+  current_block_number   Int?
 }
 
 model DraftPick {
@@ -75,6 +111,9 @@ model DraftPick {
   
   year             Int
   round            Int
+  pick_number      Int      @default(1)
+  is_used          Boolean  @default(false)
+  selected_player_id String?
   protected_rules  String?
 }
 

@@ -5,24 +5,32 @@ import SettingsTab from './components/SettingsTab';
 import TradeMachineTab from './components/TradeMachineTab';
 import FeedTab from './components/FeedTab';
 import OptionsTab from './components/OptionsTab';
+import DraftTab from './components/DraftTab';
+import FreeAgencyTab from './components/FreeAgencyTab';
 
 function App() {
   const [activeTab, setActiveTab] = useState('rosters');
   const [activeRole, setActiveRole] = useState<'PLAYER' | 'ADMIN'>('PLAYER');
   const [settings, setSettings] = useState<any>(null);
   const [isStageMenuOpen, setIsStageMenuOpen] = useState(false);
+  const [myTeamId, setMyTeamId] = useState<string>('');
 
   const fetchSettings = async () => {
     try {
       const res = await fetch('http://localhost:3000/league/settings');
       const data = await res.json();
       setSettings(data);
+      
+      const teamsRes = await fetch('http://localhost:3000/teams');
+      const teamsData = await teamsRes.json();
+      const safeTeams = Array.isArray(teamsData) ? teamsData : (teamsData.teams || []);
+      if (safeTeams.length > 0) setMyTeamId(safeTeams[0].id); // MOCK: assigning user to first team
     } catch (e) {}
   };
 
   useEffect(() => {
     fetchSettings();
-  }, [activeTab]); // re-fetch on tab change as well to keep it somewhat fresh
+  }, [activeTab]);
 
   const toggleRole = () => {
     setActiveRole(prev => prev === 'PLAYER' ? 'ADMIN' : 'PLAYER');
@@ -60,13 +68,22 @@ function App() {
   };
 
   const STAGES: Record<string, string> = {
-    'REGULAR_SEASON': '🏀 Регулярный сезон',
+    'REGULAR_SEASON_START': '🏀 Старт сезона (нет обменов)',
+    'TRADE_RESTRICTIONS_LIFTED': '🟢 Сезон (Обмены открыты)',
+    'TRADE_DEADLINE': '🔒 Трейд-дедлайн / Плей-офф',
     'OFFSEASON_OPTIONS': '📋 Межсезонье: Опции',
     'DRAFT': '🎟 Драфт',
     'FREE_AGENCY': '💼 Рынок СА'
   };
 
   const currentStageName = settings ? (STAGES[settings.current_stage] || 'Сезон') : 'Загрузка...';
+
+  const getStageBadgeStyle = (stage: string) => {
+    if (stage === 'TRADE_DEADLINE') return 'bg-[#ff3b30]/10 border-[#ff3b30]/30 text-[#ff3b30]';
+    if (stage === 'OFFSEASON_OPTIONS' || stage === 'DRAFT') return 'bg-[#ff9f0a]/10 border-[#ff9f0a]/30 text-[#ff9f0a]';
+    if (stage === 'FREE_AGENCY') return 'bg-[#34c759]/10 border-[#34c759]/30 text-[#34c759]';
+    return 'bg-[#181818] border-[#303030] text-[#3390ec]';
+  };
 
   return (
     <div className="flex flex-col h-screen bg-[#181818] text-white overflow-hidden">
@@ -96,7 +113,7 @@ function App() {
         <div className="relative">
           <button 
             onClick={() => activeRole === 'ADMIN' && setIsStageMenuOpen(!isStageMenuOpen)}
-            className={`flex items-center justify-between w-full p-2.5 rounded-xl border ${settings?.current_stage === 'OFFSEASON_OPTIONS' ? 'bg-[#ff9f0a]/10 border-[#ff9f0a]/30 text-[#ff9f0a]' : 'bg-[#181818] border-[#303030] text-[#3390ec]'} font-bold text-[13px] transition-colors`}
+            className={`flex items-center justify-between w-full p-2.5 rounded-xl border ${getStageBadgeStyle(settings?.current_stage)} font-bold text-[13px] transition-colors`}
           >
             <span>Этап: {currentStageName}</span>
             {activeRole === 'ADMIN' && <ChevronDown width="16" height="16" className="opacity-70" />}
@@ -131,17 +148,32 @@ function App() {
           </div>
         ) : null}
 
+        {settings?.current_stage === 'DRAFT' && activeTab === 'rosters' ? (
+          <div className="p-4 bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/20 flex justify-between items-center">
+            <div className="text-[12px] font-bold text-[#ff9f0a]">Драфт новичков активен!</div>
+            <button onClick={() => setActiveTab('draft')} className="bg-[#ff9f0a] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">В Draft Room</button>
+          </div>
+        ) : null}
+
+        {settings?.current_stage === 'FREE_AGENCY' && activeTab === 'rosters' ? (
+          <div className="p-4 bg-[#34c759]/10 border-b border-[#34c759]/20 flex justify-between items-center">
+            <div className="text-[12px] font-bold text-[#34c759]">Рынок СА открыт!</div>
+            <button onClick={() => setActiveTab('fa')} className="bg-[#34c759] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">Перейти</button>
+          </div>
+        ) : null}
+
         {activeTab === 'rosters' && <RostersTab role={activeRole} />}
         {activeTab === 'options' && <OptionsTab role={activeRole} />}
+        {activeTab === 'draft' && <DraftTab role={activeRole} myTeamId={myTeamId} />}
         {activeTab === 'trade' && <TradeMachineTab />}
-        {activeTab === 'fa' && <div className="p-4 flex h-full items-center justify-center text-[#8e8e93]">Свободные агенты (В разработке)</div>}
+        {activeTab === 'fa' && <FreeAgencyTab role={activeRole} myTeamId={myTeamId} />}
         {activeTab === 'feed' && <FeedTab />}
         {activeTab === 'settings' && activeRole === 'ADMIN' && <SettingsTab role={activeRole} />}
       </div>
 
       {/* Bottom Nav */}
       <div className="fixed bottom-0 w-full bg-[#212121] flex justify-around pb-6 pt-2 z-10 border-t border-[#303030]">
-        <NavButton id="rosters" icon={<Users width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Составы" active={activeTab === 'rosters' || activeTab === 'options'} onClick={() => setActiveTab('rosters')} />
+        <NavButton id="rosters" icon={<Users width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Составы" active={activeTab === 'rosters' || activeTab === 'options' || activeTab === 'draft'} onClick={() => setActiveTab('rosters')} />
         <NavButton id="trade" icon={<Replace width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Обмены" active={activeTab === 'trade'} onClick={() => setActiveTab('trade')} />
         <NavButton id="fa" icon={<UserPlus width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Свободные" active={activeTab === 'fa'} onClick={() => setActiveTab('fa')} />
         <NavButton id="feed" icon={<Rss width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Инсайды" active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} />
@@ -150,7 +182,7 @@ function App() {
   );
 }
 
-function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function NavButton({ id, icon, label, active, onClick }: { id: string, icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
   return (
     <button onClick={onClick} className={`flex flex-col items-center p-2 w-full transition-colors ${active ? 'text-[#3390ec]' : 'text-[#8e8e93] hover:text-[#aaaaaa]'}`}>
       <div className="mb-1 flex justify-center items-center h-6 w-6">{icon}</div>
