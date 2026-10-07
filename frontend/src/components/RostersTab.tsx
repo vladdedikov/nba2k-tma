@@ -32,10 +32,12 @@ export default function RostersTab({ role }: { role: string }) {
       const setJson = await setRes.json();
       const teamsJson = await teamsRes.json();
       
+      const safeTeams = Array.isArray(teamsJson) ? teamsJson : (teamsJson.teams || []);
+      
       setSettings(setJson);
-      setTeams(teamsJson || []);
-      if (teamsJson && teamsJson.length > 0 && !selectedTeamId) {
-        setSelectedTeamId(teamsJson[0].id);
+      setTeams(safeTeams);
+      if (safeTeams && safeTeams.length > 0 && !selectedTeamId) {
+        setSelectedTeamId(safeTeams[0].id);
       }
       setLoading(false);
     } catch (err) {
@@ -156,21 +158,31 @@ export default function RostersTab({ role }: { role: string }) {
     setIsTransferModalOpen(true);
   };
 
-  if (loading) return <div className="p-8 flex justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#3390ec]"></div></div>;
+  if (loading) return (
+    <div className="p-8 h-full flex flex-col items-center justify-center text-[#8e8e93]">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#3390ec] mb-4"></div>
+      <div className="text-sm font-bold">Загрузка лиги...</div>
+    </div>
+  );
   if (error) return <div className="p-4 text-center text-[#ff3b30] mt-10 font-medium">{error}</div>;
-  if (!teams || teams.length === 0) return <div className="p-4 text-center text-[#8e8e93] mt-10">Команды отсутствуют.</div>;
+  if (!Array.isArray(teams) || teams.length === 0) return <div className="p-4 text-center text-[#8e8e93] mt-10">Команды отсутствуют.</div>;
 
-  const team = teams.find(t => t.id === selectedTeamId) || teams[0];
-  if (!team || !settings) return null;
+  const team = Array.isArray(teams) ? teams.find((t) => t.id === selectedTeamId) || teams[0] : null;
+  if (!team) return <div className="p-8 h-full flex flex-col items-center justify-center text-[#8e8e93]">Загрузка команд...</div>;
 
-  const players = team.players || [];
-  const draftPicks = team.currentPicks || team.current_picks || [];
+  const players = team?.players ?? [];
+  const draftPicks = team?.currentPicks ?? team?.current_picks ?? [];
   
   const totalPayroll = players.reduce((sum: number, p: any) => sum + (p.salary || 0), 0);
   
   const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
 
-  const capPercentage = Math.min((totalPayroll / settings.hard_cap) * 100, 100);
+  const safeSoftCap = settings?.soft_cap ?? 140000000;
+  const safeLuxuryTax = settings?.luxury_tax ?? 170000000;
+  const safeFirstApron = settings?.first_apron ?? 178000000;
+  const safeHardCap = settings?.hard_cap ?? 200000000;
+
+  const capPercentage = Math.min((totalPayroll / safeHardCap) * 100, 100);
 
   return (
     <div className="p-4 space-y-5" style={{ backgroundColor: '#181818' }}>
@@ -205,14 +217,14 @@ export default function RostersTab({ role }: { role: string }) {
             <div className="mt-1 text-[13px] space-y-1">
               <div className="flex justify-between text-[#8e8e93]">
                 <span>Платежка:</span>
-                <span className={totalPayroll > settings.soft_cap ? 'text-[#ff3b30] font-bold' : 'text-white font-bold'}>
+                <span className={totalPayroll > safeSoftCap ? 'text-[#ff3b30] font-bold' : 'text-white font-bold'}>
                   {formatMoney(totalPayroll)}
                 </span>
               </div>
               <div className="flex justify-between text-[#8e8e93]">
                 <span>Место (от Soft Cap):</span>
-                <span className={settings.soft_cap - totalPayroll < 0 ? 'text-[#ff3b30]' : 'text-[#34c759]'}>
-                  {formatMoney(settings.soft_cap - totalPayroll)}
+                <span className={safeSoftCap - totalPayroll < 0 ? 'text-[#ff3b30]' : 'text-[#34c759]'}>
+                  {formatMoney(safeSoftCap - totalPayroll)}
                 </span>
               </div>
             </div>
@@ -222,19 +234,19 @@ export default function RostersTab({ role }: { role: string }) {
         {/* Progress Bar */}
         <div className="relative w-full h-3 bg-[#303030] rounded-full mt-2 overflow-hidden">
           <div 
-            className={`absolute top-0 left-0 h-full rounded-full transition-all ${totalPayroll > settings.soft_cap ? 'bg-[#ff3b30]' : 'bg-[#3390ec]'}`}
+            className={`absolute top-0 left-0 h-full rounded-full transition-all ${totalPayroll > safeSoftCap ? 'bg-[#ff3b30]' : 'bg-[#3390ec]'}`}
             style={{ width: `${capPercentage}%` }}
           ></div>
           {/* Threshold markers */}
-          <div className="absolute top-0 bottom-0 border-l-2 border-white/50" style={{ left: `${(settings.soft_cap / settings.hard_cap) * 100}%` }}></div>
-          <div className="absolute top-0 bottom-0 border-l-2 border-[#ffd60a]/50" style={{ left: `${(settings.luxury_tax / settings.hard_cap) * 100}%` }}></div>
-          <div className="absolute top-0 bottom-0 border-l-2 border-[#ff9f0a]/50" style={{ left: `${(settings.first_apron / settings.hard_cap) * 100}%` }}></div>
+          <div className="absolute top-0 bottom-0 border-l-2 border-white/50" style={{ left: `${(safeSoftCap / safeHardCap) * 100}%` }}></div>
+          <div className="absolute top-0 bottom-0 border-l-2 border-[#ffd60a]/50" style={{ left: `${(safeLuxuryTax / safeHardCap) * 100}%` }}></div>
+          <div className="absolute top-0 bottom-0 border-l-2 border-[#ff9f0a]/50" style={{ left: `${(safeFirstApron / safeHardCap) * 100}%` }}></div>
         </div>
         <div className="flex justify-between text-[10px] text-[#8e8e93] px-1 font-semibold">
           <span>0</span>
-          <span>CAP ({formatMoney(settings.soft_cap)})</span>
-          <span>TAX ({formatMoney(settings.luxury_tax)})</span>
-          <span>HARD ({formatMoney(settings.hard_cap)})</span>
+          <span>CAP ({formatMoney(safeSoftCap)})</span>
+          <span>TAX ({formatMoney(safeLuxuryTax)})</span>
+          <span>HARD ({formatMoney(safeHardCap)})</span>
         </div>
       </div>
 
@@ -252,7 +264,7 @@ export default function RostersTab({ role }: { role: string }) {
       {/* Roster List */}
       <div>
         <div className="space-y-2.5">
-          {players.sort((a: any, b: any) => (b.overall_rating || 0) - (a.overall_rating || 0)).map((p: any) => {
+          {[...players].sort((a: any, b: any) => (b.overall_rating || 0) - (a.overall_rating || 0)).map((p: any) => {
             const sals = p.salaries || [p.salary];
             const opt = p.option_type === 'PLAYER_OPTION' ? ' (PO)' : p.option_type === 'TEAM_OPTION' ? ' (TO)' : '';
             const salsStr = sals.map((s: number) => `$${(s/1000000).toFixed(1)}M`).join(' → ') + opt;
@@ -275,19 +287,26 @@ export default function RostersTab({ role }: { role: string }) {
                     {salsStr}
                   </div>
                   
-                  {role === 'ADMIN' && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => openTransferModal(p)} className="p-1.5 text-[#3390ec] hover:text-white bg-[#3390ec]/10 rounded-md transition-colors active:scale-95" title="Обмен">
-                        <ArrowRightLeft width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
-                      </button>
-                      <button onClick={() => openEditModal(p)} className="p-1.5 text-[#8e8e93] hover:text-white bg-[#303030] rounded-md transition-colors active:scale-95" title="Редактировать">
-                        <Pencil width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
-                      </button>
-                      <button onClick={() => handleDeletePlayer(p.id)} className="p-1.5 text-[#ff3b30] hover:text-white bg-[#ff3b30]/10 rounded-md transition-colors active:scale-95" title="Отчислить">
-                        <Trash2 width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {(p.option_type === 'PLAYER_OPTION' || p.option_type === 'TEAM_OPTION') && (
+                      <span className="text-[10px] font-bold px-2 py-1 rounded bg-[#ff9f0a]/20 text-[#ff9f0a] mr-2">
+                        ⚠️ {p.option_type === 'PLAYER_OPTION' ? 'PO' : 'TO'}
+                      </span>
+                    )}
+                    {role === 'ADMIN' && (
+                      <>
+                        <button onClick={() => openTransferModal(p)} className="p-1.5 text-[#3390ec] hover:text-white bg-[#3390ec]/10 rounded-md transition-colors active:scale-95" title="Обмен">
+                          <ArrowRightLeft width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
+                        </button>
+                        <button onClick={() => openEditModal(p)} className="p-1.5 text-[#8e8e93] hover:text-white bg-[#303030] rounded-md transition-colors active:scale-95" title="Редактировать">
+                          <Pencil width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
+                        </button>
+                        <button onClick={() => handleDeletePlayer(p.id)} className="p-1.5 text-[#ff3b30] hover:text-white bg-[#ff3b30]/10 rounded-md transition-colors active:scale-95" title="Отчислить">
+                          <Trash2 width="14" height="14" style={{ minWidth: 14, minHeight: 14, maxWidth: 14, maxHeight: 14 }} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             );

@@ -7,52 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  PLAYER
-}
-
-enum TradeStatus {
-  PENDING
-  ACCEPTED
-  REJECTED
-  CANCELLED
-}
-
-enum FreeAgencyStatus {
-  ACTIVE
-  CLOSED
-}
-
 model User {
-  id          String   @id @default(uuid())
-  telegram_id String   @unique
-  username    String?
-  role        Role     @default(PLAYER)
+  id            String        @id @default(uuid())
+  telegram_id   String?       @unique
+  username      String?
+  role          String        @default("USER")
   
-  team        Team?    @relation("UserTeam")
-  posts       InsiderPost[]
+  owned_teams   Team[]
+  insider_posts InsiderPost[]
 }
 
 model Team {
-  id          String   @id @default(uuid())
-  name        String
-  logo_url    String?
-  owner_id    String?  @unique
-  owner       User?    @relation("UserTeam", fields: [owner_id], references: [id])
-  budget      Float    @default(0)
-  salary_cap  Float    @default(0)
+  id             String   @id @default(uuid())
+  name           String
+  logo_url       String?
+  budget         Float    @default(0)
+  salary_cap     Float    @default(140000000)
 
-  players     Player[]
+  owner_id       String?
+  owner          User?    @relation(fields: [owner_id], references: [id])
+
+  players        Player[]
   
   original_picks DraftPick[] @relation("OriginalTeamPicks")
   current_picks  DraftPick[] @relation("CurrentTeamPicks")
 
-  sent_trades     TradeOffer[] @relation("SenderTeamTrades")
-  received_trades TradeOffer[] @relation("ReceiverTeamTrades")
+  trade_offers_sent     TradeOffer[] @relation("SentOffers")
+  trade_offers_received TradeOffer[] @relation("ReceivedOffers")
 
-  insider_posts   InsiderPost[]
-  free_agency_bids FreeAgencyLot[]
+  free_agency_lots_won  FreeAgencyLot[] @relation("HighestBidder")
+  insider_posts         InsiderPost[]
 }
 
 model Player {
@@ -67,62 +51,54 @@ model Player {
   
   team_id             String?
   team                Team?    @relation(fields: [team_id], references: [id])
+  previous_team_id    String?
 
   free_agency_lots    FreeAgencyLot[]
-
-  trade_offers_sent     TradeOffer[] @relation("SentPlayers")
-  trade_offers_received TradeOffer[] @relation("ReceivedPlayers")
 }
 
 model LeagueSettings {
-  id           Int   @id @default(1)
-  soft_cap     Float @default(140.0)
-  luxury_tax   Float @default(170.0)
-  first_apron  Float @default(178.0)
-  second_apron Float @default(189.0)
-  hard_cap     Float @default(200.0)
+  id            Int   @id @default(1)
+  soft_cap      Float @default(140.0)
+  luxury_tax    Float @default(170.0)
+  first_apron   Float @default(178.0)
+  second_apron  Float @default(189.0)
+  hard_cap      Float @default(200.0)
+  current_stage String @default("REGULAR_SEASON")
 }
 
 model DraftPick {
   id               String   @id @default(uuid())
   original_team_id String
   original_team    Team     @relation("OriginalTeamPicks", fields: [original_team_id], references: [id])
-  
   current_team_id  String
   current_team     Team     @relation("CurrentTeamPicks", fields: [current_team_id], references: [id])
   
   year             Int
   round            Int
   protected_rules  String?
-
-  trade_offers_sent     TradeOffer[] @relation("SentPicks")
-  trade_offers_received TradeOffer[] @relation("ReceivedPicks")
 }
 
 model TradeOffer {
-  id               String      @id @default(uuid())
-  sender_team_id   String
-  sender_team      Team        @relation("SenderTeamTrades", fields: [sender_team_id], references: [id])
-  
-  receiver_team_id String
-  receiver_team    Team        @relation("ReceiverTeamTrades", fields: [receiver_team_id], references: [id])
-  
-  status           TradeStatus @default(PENDING)
-  comment          String?
-  created_at       DateTime    @default(now())
+  id                  String   @id @default(uuid())
+  sender_team_id      String
+  receiver_team_id    String
+  status              String   @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED
+  message             String?
+  created_at          DateTime @default(now())
 
-  sent_players     Player[]    @relation("SentPlayers")
-  received_players Player[]    @relation("ReceivedPlayers")
-  
-  sent_picks       DraftPick[] @relation("SentPicks")
-  received_picks   DraftPick[] @relation("ReceivedPicks")
+  sent_player_ids     String[]
+  received_player_ids String[]
+  sent_pick_ids       String[]
+  received_pick_ids   String[]
+
+  sender_team   Team @relation("SentOffers", fields: [sender_team_id], references: [id])
+  receiver_team Team @relation("ReceivedOffers", fields: [receiver_team_id], references: [id])
 }
 
 model InsiderPost {
   id         String   @id @default(uuid())
-  author_id  String
-  author     User     @relation(fields: [author_id], references: [id])
-  
+  author_id  String?
+  author     User?    @relation(fields: [author_id], references: [id])
   team_id    String?
   team       Team?    @relation(fields: [team_id], references: [id])
   
@@ -131,17 +107,15 @@ model InsiderPost {
 }
 
 model FreeAgencyLot {
-  id                     String           @id @default(uuid())
+  id                     String   @id @default(uuid())
   batch_number           Int
-  
   player_id              String
-  player                 Player           @relation(fields: [player_id], references: [id])
+  player                 Player   @relation(fields: [player_id], references: [id])
   
-  current_highest_bid    Float            @default(0)
-  
+  current_highest_bid    Float    @default(0)
   highest_bidder_team_id String?
-  highest_bidder         Team?            @relation(fields: [highest_bidder_team_id], references: [id])
+  highest_bidder_team    Team?    @relation("HighestBidder", fields: [highest_bidder_team_id], references: [id])
   
   expires_at             DateTime
-  status                 FreeAgencyStatus @default(ACTIVE)
+  status                 String   @default("OPEN")
 }
