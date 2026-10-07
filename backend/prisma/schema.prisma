@@ -61,7 +61,9 @@ model Player {
   position            String
   overall_rating      Int
   salary              Float
+  salaries            Float[]
   contract_years_left Int
+  option_type         String   @default("NONE")
   
   team_id             String?
   team                Team?    @relation(fields: [team_id], references: [id])
@@ -70,6 +72,15 @@ model Player {
 
   trade_offers_sent     TradeOffer[] @relation("SentPlayers")
   trade_offers_received TradeOffer[] @relation("ReceivedPlayers")
+}
+
+model LeagueSettings {
+  id           Int   @id @default(1)
+  soft_cap     Float @default(140.0)
+  luxury_tax   Float @default(170.0)
+  first_apron  Float @default(178.0)
+  second_apron Float @default(189.0)
+  hard_cap     Float @default(200.0)
 }
 
 model DraftPick {

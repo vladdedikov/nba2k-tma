@@ -14,6 +14,19 @@ async function main() {
   await prisma.team.deleteMany();
   await prisma.user.deleteMany();
 
+  // 0. League Settings
+  await prisma.leagueSettings.deleteMany();
+  await prisma.leagueSettings.create({
+    data: {
+      id: 1,
+      soft_cap: 140000000,
+      luxury_tax: 170000000,
+      first_apron: 178000000,
+      second_apron: 189000000,
+      hard_cap: 200000000
+    }
+  });
+
   // 1. Create a test user
   const adminUser = await prisma.user.create({
     data: {
@@ -100,7 +113,11 @@ async function main() {
   ];
 
   await prisma.player.createMany({
-    data: playersData,
+    data: playersData.map(p => ({
+      ...p,
+      salaries: Array(p.contract_years_left).fill(p.salary),
+      option_type: 'NONE'
+    })),
   });
 
   // 4. Create Draft Picks for the next 2 years for each team
