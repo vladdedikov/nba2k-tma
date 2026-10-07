@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PLAYER
+}
+
+enum TradeStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum FreeAgencyStatus {
+  ACTIVE
+  CLOSED
+}
+
+model User {
+  id          String   @id @default(uuid())
+  telegram_id String   @unique
+  username    String?
+  role        Role     @default(PLAYER)
+  
+  team        Team?    @relation("UserTeam")
+  posts       InsiderPost[]
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  name        String
+  logo_url    String?
+  owner_id    String?  @unique
+  owner       User?    @relation("UserTeam", fields: [owner_id], references: [id])
+  budget      Float    @default(0)
+  salary_cap  Float    @default(0)
+
+  players     Player[]
+  
+  original_picks DraftPick[] @relation("OriginalTeamPicks")
+  current_picks  DraftPick[] @relation("CurrentTeamPicks")
+
+  sent_trades     TradeOffer[] @relation("SenderTeamTrades")
+  received_trades TradeOffer[] @relation("ReceiverTeamTrades")
+
+  insider_posts   InsiderPost[]
+  free_agency_bids FreeAgencyLot[]
+}
+
+model Player {
+  id                  String   @id @default(uuid())
+  name                String
+  position            String
+  overall_rating      Int
+  salary              Float
+  contract_years_left Int
+  
+  team_id             String?
+  team                Team?    @relation(fields: [team_id], references: [id])
+
+  free_agency_lots    FreeAgencyLot[]
+
+  trade_offers_sent     TradeOffer[] @relation("SentPlayers")
+  trade_offers_received TradeOffer[] @relation("ReceivedPlayers")
+}
+
+model DraftPick {
+  id               String   @id @default(uuid())
+  original_team_id String
+  original_team    Team     @relation("OriginalTeamPicks", fields: [original_team_id], references: [id])
+  
+  current_team_id  String
+  current_team     Team     @relation("CurrentTeamPicks", fields: [current_team_id], references: [id])
+  
+  year             Int
+  round            Int
+  protected_rules  String?
+
+  trade_offers_sent     TradeOffer[] @relation("SentPicks")
+  trade_offers_received TradeOffer[] @relation("ReceivedPicks")
+}
+
+model TradeOffer {
+  id               String      @id @default(uuid())
+  sender_team_id   String
+  sender_team      Team        @relation("SenderTeamTrades", fields: [sender_team_id], references: [id])
+  
+  receiver_team_id String
+  receiver_team    Team        @relation("ReceiverTeamTrades", fields: [receiver_team_id], references: [id])
+  
+  status           TradeStatus @default(PENDING)
+  comment          String?
+  created_at       DateTime    @default(now())
+
+  sent_players     Player[]    @relation("SentPlayers")
+  received_players Player[]    @relation("ReceivedPlayers")
+  
+  sent_picks       DraftPick[] @relation("SentPicks")
+  received_picks   DraftPick[] @relation("ReceivedPicks")
+}
+
+model InsiderPost {
+  id         String   @id @default(uuid())
+  author_id  String
+  author     User     @relation(fields: [author_id], references: [id])
+  
+  team_id    String?
+  team       Team?    @relation(fields: [team_id], references: [id])
+  
+  content    String
+  created_at DateTime @default(now())
+}
+
+model FreeAgencyLot {
+  id                     String           @id @default(uuid())
+  batch_number           Int
+  
+  player_id              String
+  player                 Player           @relation(fields: [player_id], references: [id])
+  
+  current_highest_bid    Float            @default(0)
+  
+  highest_bidder_team_id String?
+  highest_bidder         Team?            @relation(fields: [highest_bidder_team_id], references: [id])
+  
+  expires_at             DateTime
+  status                 FreeAgencyStatus @default(ACTIVE)
+}
