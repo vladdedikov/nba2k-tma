@@ -329,8 +329,6 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   };
 
   const myTeam = teams.find(t => t.id === myTeamId);
-  const myTeamPayroll = (myTeam?.players || []).reduce((sum: number, p: any) => sum + p.salary, 0);
-
   const activeBlockData = blocks.find(b => b.id === activeBlockId);
 
   return (

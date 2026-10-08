@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect } from 'react';
 import { Pencil, Trash2, Plus, X, ArrowRightLeft } from 'lucide-react';
 
 export default function RostersTab({ role }: { role: string }) {
@@ -23,6 +23,8 @@ export default function RostersTab({ role }: { role: string }) {
 
   const [isPickModalOpen, setIsPickModalOpen] = useState(false);
   const [pickFormData, setPickFormData] = useState({ year: new Date().getFullYear(), name: '', team_id: '' });
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [isSavingPick, setIsSavingPick] = useState(false);
 
   const [transferTargetId, setTransferTargetId] = useState('');
 
@@ -134,29 +136,107 @@ export default function RostersTab({ role }: { role: string }) {
 
   const handleAddPick = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (role !== 'ADMIN') return;
+    if (role !== 'ADMIN') {
+      alert('Только администратор может добавлять драфт-пики');
+      return;
+    }
+
+    const currentTeamId = team?.id || selectedTeamId || pickFormData.team_id;
+    if (!currentTeamId) {
+      alert('Ошибка: текущая команда не определена!');
+      return;
+    }
+
+    console.log('Отправка пика для команды:', { 
+      currentTeamId, 
+      year: pickFormData.year, 
+      name: pickFormData.name 
+    });
+
+    setPickError(null);
+    setIsSavingPick(true);
+
     try {
-      await fetch('http://localhost:3000/admin/draft-picks', {
+      const payload = {
+        team_id: currentTeamId,
+        year: Number(pickFormData.year),
+        name: String(pickFormData.name).trim()
+      };
+
+      const res = await fetch('http://localhost:3000/admin/draft-picks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-role': role },
-        body: JSON.stringify(pickFormData)
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-user-role': role 
+        },
+        body: JSON.stringify(payload)
       });
+
+      const data = await res.json().catch(() => null);
+      console.log('Ответ сервера при добавлении пика:', { status: res.status, ok: res.ok, data });
+
+      if (!res.ok || !data?.success) {
+        const errorText = data?.error || `Ошибка сервера (${res.status})`;
+        console.error('Ошибка создания пика:', errorText);
+        setPickError(errorText);
+        alert(`Ошибка создания пика: ${errorText}`);
+        return;
+      }
+
+      // 1. Мгновенное локальное обновление состояния команд
+      if (data.pick) {
+        setTeams(prevTeams => prevTeams.map(t => {
+          if (t.id === currentTeamId) {
+            const existing = t.draft_picks || t.picks || [];
+            return {
+              ...t,
+              draft_picks: [...existing, data.pick]
+            };
+          }
+          return t;
+        }));
+      }
+
+      // 2. Очистить поля и закрыть модалку
+      setPickFormData({ year: new Date().getFullYear(), name: '', team_id: '' });
+      setPickError(null);
       setIsPickModalOpen(false);
+
+      // 3. Фоновая синхронизация с сервером
       fetchSettingsAndTeams();
-    } catch (err) {
-      alert('Ошибка при добавлении пика');
+    } catch (err: any) {
+      console.error('Сетевая ошибка при отправке пика:', err);
+      const errMsg = err?.message || 'Сбой сети при запросе к серверу';
+      setPickError(errMsg);
+      alert(`Ошибка запроса: ${errMsg}`);
+    } finally {
+      setIsSavingPick(false);
     }
   };
 
   const handleDeletePick = async (pickId: number) => {
     if (role !== 'ADMIN' || !confirm('Точно удалить этот пик?')) return;
     try {
-      await fetch(`http://localhost:3000/admin/draft-picks/${pickId}`, {
+      // Оптимистичное локальное удаление
+      setTeams(prevTeams => prevTeams.map(t => {
+        const existing = t.draft_picks || t.picks || [];
+        return {
+          ...t,
+          draft_picks: existing.filter((p: any) => p.id !== pickId)
+        };
+      }));
+
+      const res = await fetch(`http://localhost:3000/admin/draft-picks/${pickId}`, {
         method: 'DELETE',
         headers: { 'x-user-role': role }
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        alert(errData?.error || 'Ошибка при удалении пика');
+      }
       fetchSettingsAndTeams();
     } catch (err) {
+      console.error('Ошибка при удалении пика:', err);
       alert('Ошибка при удалении пика');
     }
   };
@@ -203,7 +283,7 @@ export default function RostersTab({ role }: { role: string }) {
   if (!team) return <div className="p-8 h-full flex flex-col items-center justify-center text-[#8e8e93]">Загрузка команд...</div>;
 
   const players = team?.players ?? [];
-  const draftPicks = team?.currentPicks ?? team?.current_picks ?? [];
+  const draftPicks = team?.draft_picks ?? team?.picks ?? team?.currentPicks ?? team?.current_picks ?? [];
   
   const totalPayroll = players.reduce((sum: number, p: any) => sum + (p.salary || 0), 0);
   
@@ -470,22 +550,49 @@ export default function RostersTab({ role }: { role: string }) {
       {isPickModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4">
           <div className="bg-[#212121] w-full max-w-sm rounded-2xl p-5 relative shadow-xl border border-[#303030]">
-            <button onClick={() => setIsPickModalOpen(false)} className="absolute top-4 right-4 text-[#8e8e93] hover:text-white transition-colors">
+            <button onClick={() => { setIsPickModalOpen(false); setPickError(null); }} className="absolute top-4 right-4 text-[#8e8e93] hover:text-white transition-colors">
               <X width="24" height="24" style={{ minWidth: 24, minHeight: 24, maxWidth: 24, maxHeight: 24 }} />
             </button>
-            <h2 className="text-xl font-bold mb-5 text-white">Добавить драфт-пик</h2>
+            <h2 className="text-xl font-bold mb-1 text-white">Добавить драфт-пик</h2>
+            <p className="text-xs text-[#8e8e93] mb-4">Для команды: <span className="text-[#3390ec] font-bold">{team?.name || 'Текущая команда'}</span></p>
             <form onSubmit={handleAddPick} className="space-y-4">
 
               <div>
-                <label className="block text-[13px] font-semibold text-[#8e8e93] mb-1.5 uppercase">Год</label>
-                <input required type="number" value={pickFormData.year} onChange={e => setPickFormData({...pickFormData, year: Number(e.target.value)})} className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" />
+                <label className="block text-[13px] font-semibold text-[#8e8e93] mb-1.5 uppercase">Год пика</label>
+                <input 
+                  required 
+                  type="number" 
+                  min="2024"
+                  max="2040"
+                  value={pickFormData.year} 
+                  onChange={e => setPickFormData({...pickFormData, year: Number(e.target.value)})} 
+                  className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" 
+                />
               </div>
               <div>
                 <label className="block text-[13px] font-semibold text-[#8e8e93] mb-1.5 uppercase">Описание пика</label>
-                <input required type="text" placeholder="например: 1-й раунд (Бостон) или 2-й раунд с защитой" value={pickFormData.name} onChange={e => setPickFormData({...pickFormData, name: e.target.value})} className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" />
+                <input 
+                  required 
+                  type="text" 
+                  placeholder="например: 1-й раунд (Бостон) или 2-й раунд с защитой" 
+                  value={pickFormData.name} 
+                  onChange={e => setPickFormData({...pickFormData, name: e.target.value})} 
+                  className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" 
+                />
               </div>
-              <button type="submit" className="w-full bg-[#34c759] text-white py-3.5 rounded-xl font-bold hover:bg-[#2eb050] active:scale-[0.98] transition-transform">
-                Сохранить пик
+
+              {pickError && (
+                <div className="p-3 bg-[#ff3b30]/15 border border-[#ff3b30]/30 rounded-xl text-[#ff3b30] text-xs font-medium">
+                  {pickError}
+                </div>
+              )}
+
+              <button 
+                type="submit" 
+                disabled={isSavingPick}
+                className="w-full bg-[#34c759] text-white py-3.5 rounded-xl font-bold hover:bg-[#2eb050] active:scale-[0.98] transition-transform disabled:opacity-50"
+              >
+                {isSavingPick ? 'Сохранение...' : 'Сохранить пик'}
               </button>
             </form>
           </div>

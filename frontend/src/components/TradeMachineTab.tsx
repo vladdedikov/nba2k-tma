@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, ChevronDown, ChevronUp, ArrowRightLeft } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, ArrowRightLeft } from 'lucide-react';
 
 export default function TradeMachineTab() {
   const [subTab, setSubTab] = useState<'BUILDER' | 'OFFERS'>('BUILDER');
@@ -58,7 +58,6 @@ export default function TradeMachineTab() {
   const partnerTeam = safeTeamsArray.find(t => t.id === partnerTeamId);
 
   const getPlayersBySet = (team: any, ids: Set<string>) => (team?.players || []).filter((p: any) => ids.has(p.id));
-  const getPicksBySet = (team: any, ids: Set<string>) => (team?.picks || []).filter((p: any) => ids.has(p.id));
 
   const myOutgoingPlayers = getPlayersBySet(myTeam, selectedMyPlayers);
   const myIncomingPlayers = getPlayersBySet(partnerTeam, selectedPartnerPlayers);
@@ -216,7 +215,7 @@ export default function TradeMachineTab() {
                       </div>
                     );
                   })}
-                  {(myTeam?.current_picks || myTeam?.currentPicks || []).map((p: any) => (
+                  {(myTeam?.draft_picks || myTeam?.picks || []).map((p: any) => (
                     <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
                       <div className="font-bold">🎟 {p.year}: {p.name}</div>
                     </div>
@@ -246,7 +245,7 @@ export default function TradeMachineTab() {
                       </div>
                     );
                   })}
-                  {(partnerTeam?.picks || []).map((p: any) => (
+                  {(partnerTeam?.draft_picks || partnerTeam?.picks || []).map((p: any) => (
                     <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
                       <div className="font-bold">🎟 {p.year}: {p.name}</div>
                     </div>
@@ -292,7 +291,7 @@ export default function TradeMachineTab() {
                   key={o.id} 
                   offer={o} 
                   allPlayers={safeTeamsArray.flatMap((t: any) => t.players || [])} 
-                  allPicks={safeTeamsArray.flatMap((t: any) => t.picks || [])}
+                  allPicks={safeTeamsArray.flatMap((t: any) => t.draft_picks || t.picks || [])}
                   respondToOffer={respondToOffer} 
                   isTradeDeadline={isTradeDeadline}
                 />

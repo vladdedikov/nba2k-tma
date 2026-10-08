@@ -210,8 +210,8 @@ fastify.post('/trades/:id/respond', async (request, reply) => {
     await prisma.$transaction([
       ...trade.sent_player_ids.map(pid => prisma.player.update({ where: { id: pid }, data: { team_id: trade.receiver_team_id } })),
       ...trade.received_player_ids.map(pid => prisma.player.update({ where: { id: pid }, data: { team_id: trade.sender_team_id } })),
-      ...trade.sent_pick_ids.map(pid => prisma.draftPick.update({ where: { id: pid }, data: { current_team_id: trade.receiver_team_id } })),
-      ...trade.received_pick_ids.map(pid => prisma.draftPick.update({ where: { id: pid }, data: { current_team_id: trade.sender_team_id } })),
+      ...trade.sent_pick_ids.map(pid => prisma.draftPick.update({ where: { id: pid }, data: { team_id: trade.receiver_team_id } })),
+      ...trade.received_pick_ids.map(pid => prisma.draftPick.update({ where: { id: pid }, data: { team_id: trade.sender_team_id } })),
       prisma.tradeOffer.update({ where: { id }, data: { status: 'ACCEPTED' } }),
       prisma.insiderPost.create({
         data: {
@@ -381,39 +381,69 @@ fastify.delete('/admin/draft/prospects/:id', async (request, reply) => {
   return { success: true };
 });
 
-fastify.post('/admin/draft-picks', async (request, reply) => {
-  try {
-    if (!checkAdmin(request, reply)) return;
-    const { team_id, year, name } = request.body as any;
-    
-    const parsedTeamId = String(team_id || '').trim();
-    const parsedYear = Number(year);
-    const parsedName = String(name || '').trim();
-    
-    if (!parsedTeamId || !parsedYear || !parsedName) {
-      return reply.status(400).send({ error: "Заполните год и название пика" });
+const createDraftPickHandler = async (request: any, reply: any) => {
+  console.log('>>> [DRAFT_PICK_CREATE] Входящие данные:', request.body);
+  if (!checkAdmin(request, reply)) {
+    console.error('>>> [DRAFT_PICK_CREATE] Ошибка авторизации: пользователь не ADMIN');
+    return;
+  }
+  const { team_id, teamId, year, name } = (request.body as any) || {};
+  const rawTeamId = team_id !== undefined ? team_id : teamId;
+  let targetTeamId = String(rawTeamId || '').trim();
+  const targetYear = Number(year);
+  const targetName = String(name || '').trim();
+
+  // If a numeric index was provided (e.g., 1, 2, 3), find corresponding team in DB
+  if (targetTeamId && !isNaN(Number(targetTeamId)) && !targetTeamId.includes('-')) {
+    const allTeams = await prisma.team.findMany({ orderBy: { name: 'asc' } });
+    const num = Number(targetTeamId);
+    if (allTeams[num - 1]) {
+      targetTeamId = allTeams[num - 1].id;
     }
-    
-    const pick = await prisma.draftPick.create({
+  }
+
+  if (!targetTeamId || !targetYear || !targetName) {
+    console.error('>>> [DRAFT_PICK_CREATE] Ошибка валидации:', { targetTeamId, targetYear, targetName });
+    return reply.status(400).send({ 
+      error: `Некорректные параметры: team_id=${targetTeamId}, year=${targetYear}, name=${targetName}` 
+    });
+  }
+
+  try {
+    const newPick = await prisma.draftPick.create({
       data: {
-        team_id: parsedTeamId,
-        year: parsedYear,
-        name: parsedName,
+        team_id: targetTeamId,
+        year: targetYear,
+        name: targetName,
       }
     });
-    return reply.status(201).send({ success: true, pick });
-  } catch (error) {
-    console.error('Draft pick creation error:', error);
-    return reply.status(500).send({ error: 'Internal server error' });
+    console.log('>>> [DRAFT_PICK_CREATE] Успешно создан пик:', newPick);
+    return reply.status(201).send({ success: true, pick: newPick });
+  } catch (dbErr: any) {
+    console.error('>>> [DRAFT_PICK_CREATE] Ошибка базы данных:', dbErr);
+    return reply.status(500).send({ error: dbErr?.message || 'Database error' });
   }
-});
+};
 
-fastify.delete('/admin/draft-picks/:id', async (request, reply) => {
+const deleteDraftPickHandler = async (request: any, reply: any) => {
+  console.log('>>> [DRAFT_PICK_DELETE] Запрос на удаление:', request.params);
   if (!checkAdmin(request, reply)) return;
   const { id } = request.params as any;
-  await prisma.draftPick.delete({ where: { id: Number(id) } });
-  return { success: true };
-});
+  try {
+    await prisma.draftPick.delete({ where: { id: Number(id) } });
+    console.log('>>> [DRAFT_PICK_DELETE] Успешно удален id:', id);
+    return { success: true };
+  } catch (dbErr: any) {
+    console.error('>>> [DRAFT_PICK_DELETE] Ошибка базы данных:', dbErr);
+    return reply.status(500).send({ error: dbErr?.message || 'Database error' });
+  }
+};
+
+fastify.post('/admin/draft-picks', createDraftPickHandler);
+fastify.post('/api/admin/draft-picks', createDraftPickHandler);
+
+fastify.delete('/admin/draft-picks/:id', deleteDraftPickHandler);
+fastify.delete('/api/admin/draft-picks/:id', deleteDraftPickHandler);
 
 fastify.patch('/admin/draft/setup', async (request, reply) => {
   if (!checkAdmin(request, reply)) return;

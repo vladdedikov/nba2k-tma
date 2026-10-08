@@ -183,7 +183,7 @@ function App() {
   );
 }
 
-function NavButton({ id, icon, label, active, onClick }: { id: string, icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+function NavButton({ icon, label, active, onClick }: { id?: string, icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
   return (
     <button onClick={onClick} className={`flex flex-col items-center p-2 w-full transition-colors ${active ? 'text-[#3390ec]' : 'text-[#8e8e93] hover:text-[#aaaaaa]'}`}>
       <div className="mb-1 flex justify-center items-center h-6 w-6">{icon}</div>
