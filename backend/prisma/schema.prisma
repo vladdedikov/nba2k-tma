@@ -30,8 +30,7 @@ model Team {
   players        Player[]
   contract_offers ContractOffer[]
   
-  original_picks DraftPick[] @relation("OriginalTeamPicks")
-  current_picks  DraftPick[] @relation("CurrentTeamPicks")
+  draft_picks    DraftPick[]
 
   trade_offers_sent     TradeOffer[] @relation("SentOffers")
   trade_offers_received TradeOffer[] @relation("ReceivedOffers")
@@ -57,7 +56,8 @@ model Player {
   is_prospect         Boolean  @default(false)
   is_trade_restricted Boolean  @default(false)
   is_rfa              Boolean  @default(false)
-  fa_block            Int      @default(1)
+  fa_block_id         Int?
+  fa_block            FaBlock? @relation(fields: [fa_block_id], references: [id])
 
   free_agency_lots    FreeAgencyLot[]
   contract_offers     ContractOffer[]
@@ -98,23 +98,19 @@ model LeagueSettings {
   supermax_schedule      Float[]
 
   approved_fa_blocks     Int[]    @default([])
+  completed_fa_blocks    Int[]    @default([])
   current_block_deadline DateTime?
   current_block_number   Int?
 }
 
 model DraftPick {
-  id               String   @id @default(uuid())
-  original_team_id String
-  original_team    Team     @relation("OriginalTeamPicks", fields: [original_team_id], references: [id])
-  current_team_id  String
-  current_team     Team     @relation("CurrentTeamPicks", fields: [current_team_id], references: [id])
-  
-  year             Int
-  round            Int
-  pick_number      Int      @default(1)
-  is_used          Boolean  @default(false)
-  selected_player_id String?
-  protected_rules  String?
+  id         Int      @id @default(autoincrement())
+  year       Int
+  name       String
+  team_id    String
+  team       Team     @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  is_used    Boolean  @default(false)
+  created_at DateTime @default(now())
 }
 
 model TradeOffer {
@@ -127,8 +123,8 @@ model TradeOffer {
 
   sent_player_ids     String[]
   received_player_ids String[]
-  sent_pick_ids       String[]
-  received_pick_ids   String[]
+  sent_pick_ids       Int[]
+  received_pick_ids   Int[]
 
   sender_team   Team @relation("SentOffers", fields: [sender_team_id], references: [id])
   receiver_team Team @relation("ReceivedOffers", fields: [receiver_team_id], references: [id])
@@ -157,4 +153,12 @@ model FreeAgencyLot {
   
   expires_at             DateTime
   status                 String   @default("OPEN")
+}
+
+model FaBlock {
+  id Int @id @default(autoincrement())
+  number Int
+  status String @default("PENDING")
+  deadline DateTime?
+  players Player[]
 }

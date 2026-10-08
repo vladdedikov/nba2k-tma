@@ -42,8 +42,8 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
 
   const handlePickTeamChange = (pickIndex: number, newTeamId: string) => {
     const newBoard = [...board];
-    newBoard[pickIndex].current_team_id = newTeamId;
-    newBoard[pickIndex].current_team = teams.find(t => t.id === newTeamId) || newBoard[pickIndex].current_team;
+    newBoard[pickIndex].team_id = newTeamId;
+    newBoard[pickIndex].team = teams.find(t => t.id === newTeamId) || newBoard[pickIndex].team;
     setBoard(newBoard);
   };
 
@@ -54,7 +54,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
       await fetch('http://localhost:3000/admin/draft/setup', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
-        body: JSON.stringify({ picks: board.map(p => ({ id: p.id, current_team_id: p.current_team_id })) })
+        body: JSON.stringify({ picks: board.map(p => ({ id: p.id, team_id: p.team_id })) })
       });
       await fetchData();
     } catch (e) {
@@ -100,7 +100,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
     const currentPick = board[settings.current_draft_pick_index];
     if (!currentPick) return;
     
-    if (role !== 'ADMIN' && myTeamId !== currentPick.current_team_id) {
+    if (role !== 'ADMIN' && myTeamId !== currentPick.team_id) {
       alert('Сейчас не ваш выбор!');
       return;
     }
@@ -150,7 +150,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
               <div key={pick.id} className="bg-[#212121] p-3 rounded-xl border border-[#303030] flex items-center gap-3">
                 <span className="font-bold text-[#8e8e93] shrink-0 w-8">#{i + 1}</span>
                 <select 
-                  value={pick.current_team_id} 
+                  value={pick.team_id} 
                   onChange={(e) => handlePickTeamChange(i, e.target.value)}
                   className="flex-1 bg-[#181818] border border-[#303030] text-white text-[13px] rounded-lg p-2 outline-none font-bold"
                 >
@@ -235,7 +235,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
           return (
             <div key={pick.id} className={`shrink-0 w-[100px] p-2 rounded-xl border flex flex-col items-center justify-center text-center transition-all ${isCurrent ? 'bg-[#3390ec]/20 border-[#3390ec] scale-105' : isUsed ? 'bg-[#181818] border-[#303030] opacity-60' : 'bg-[#212121] border-[#303030]'}`}>
               <div className="text-[10px] text-[#8e8e93] font-bold mb-1">ПИК #{i + 1}</div>
-              <div className="text-[12px] font-bold text-white line-clamp-2">{pick.current_team?.name}</div>
+              <div className="text-[12px] font-bold text-white line-clamp-2">{pick.team?.name}</div>
             </div>
           );
         })}
@@ -252,7 +252,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
           {/* On The Clock Banner */}
           <div className="bg-[#3390ec]/10 border-b border-[#3390ec]/30 p-3 flex justify-center items-center gap-2">
             <span className="animate-pulse text-[16px]">⏱</span>
-            <span className="text-[#3390ec] font-bold text-[14px]">НА ЧАСАХ: {currentPick?.current_team?.name} (Пик #{settings.current_draft_pick_index + 1})</span>
+            <span className="text-[#3390ec] font-bold text-[14px]">НА ЧАСАХ: {currentPick?.team?.name} (Пик #{settings.current_draft_pick_index + 1})</span>
           </div>
 
           {/* Prospects List */}
@@ -269,7 +269,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
                   
                   <button 
                     onClick={() => draftPlayer(p.id)}
-                    disabled={role !== 'ADMIN' && myTeamId !== currentPick?.current_team_id}
+                    disabled={role !== 'ADMIN' && myTeamId !== currentPick?.team_id}
                     className="w-full py-2 bg-[#3390ec] text-white text-[12px] font-bold rounded-xl active:scale-[0.98] disabled:bg-[#303030] disabled:text-[#8e8e93] disabled:cursor-not-allowed transition-all"
                   >
                     Выбрать игрока

@@ -21,6 +21,9 @@ export default function RostersTab({ role }: { role: string }) {
     option_type: 'NONE'
   });
 
+  const [isPickModalOpen, setIsPickModalOpen] = useState(false);
+  const [pickFormData, setPickFormData] = useState({ year: new Date().getFullYear(), name: '', team_id: '' });
+
   const [transferTargetId, setTransferTargetId] = useState('');
 
   const fetchSettingsAndTeams = async () => {
@@ -126,6 +129,35 @@ export default function RostersTab({ role }: { role: string }) {
       fetchSettingsAndTeams();
     } catch (err) {
       alert('Ошибка перевода');
+    }
+  };
+
+  const handleAddPick = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (role !== 'ADMIN') return;
+    try {
+      await fetch('http://localhost:3000/admin/draft-picks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-role': role },
+        body: JSON.stringify(pickFormData)
+      });
+      setIsPickModalOpen(false);
+      fetchSettingsAndTeams();
+    } catch (err) {
+      alert('Ошибка при добавлении пика');
+    }
+  };
+
+  const handleDeletePick = async (pickId: number) => {
+    if (role !== 'ADMIN' || !confirm('Точно удалить этот пик?')) return;
+    try {
+      await fetch(`http://localhost:3000/admin/draft-picks/${pickId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-role': role }
+      });
+      fetchSettingsAndTeams();
+    } catch (err) {
+      alert('Ошибка при удалении пика');
     }
   };
 
@@ -322,12 +354,28 @@ export default function RostersTab({ role }: { role: string }) {
 
       {/* Picks */}
       <div>
-        <h3 className="text-[15px] font-bold text-[#8e8e93] uppercase tracking-wide mb-3 ml-1">Пики</h3>
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-[15px] font-bold text-[#8e8e93] uppercase tracking-wide ml-1">Пики</h3>
+          {role === 'ADMIN' && (
+            <button 
+              onClick={() => { setPickFormData({ year: new Date().getFullYear(), name: '', team_id: team.id }); setIsPickModalOpen(true); }} 
+              className="text-[#3390ec] text-[12px] font-bold bg-[#3390ec]/10 px-3 py-1.5 rounded-lg flex items-center gap-1"
+            >
+              <Plus width="14" height="14" /> Добавить драфт-пик
+            </button>
+          )}
+        </div>
+        
         <div className="flex flex-wrap gap-2">
-          {draftPicks.length > 0 ? draftPicks.sort((a: any, b: any) => a.year - b.year || a.round - b.round).map((pick: any) => (
+          {draftPicks.length > 0 ? draftPicks.sort((a: any, b: any) => a.year - b.year).map((pick: any) => (
             <div key={pick.id} className="bg-[#212121] px-3 py-1.5 rounded-lg text-[13px] border border-[#303030] flex items-center gap-1.5">
-              <span className="font-bold text-white">{pick.year}</span>
-              <span className="text-[#8e8e93]">R{pick.round}</span>
+              <span className="font-bold text-white">🎟 {pick.year}:</span>
+              <span className="text-[#8e8e93]">{pick.name}</span>
+              {role === 'ADMIN' && (
+                <button onClick={() => handleDeletePick(pick.id)} className="ml-1 text-[#ff3b30] hover:text-[#ff453a] transition-colors">
+                  <X width="14" height="14" />
+                </button>
+              )}
             </div>
           )) : (
             <div className="text-[#8e8e93] text-[13px] px-1">Нет пиков</div>
@@ -412,6 +460,32 @@ export default function RostersTab({ role }: { role: string }) {
 
               <button type="submit" className="w-full bg-[#3390ec] text-white py-3.5 rounded-xl font-bold mt-2 hover:bg-[#2b7bc4] active:scale-[0.98] transition-transform">
                 {editingPlayer ? 'Сохранить изменения' : 'Создать'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Pick Modal */}
+      {isPickModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4">
+          <div className="bg-[#212121] w-full max-w-sm rounded-2xl p-5 relative shadow-xl border border-[#303030]">
+            <button onClick={() => setIsPickModalOpen(false)} className="absolute top-4 right-4 text-[#8e8e93] hover:text-white transition-colors">
+              <X width="24" height="24" style={{ minWidth: 24, minHeight: 24, maxWidth: 24, maxHeight: 24 }} />
+            </button>
+            <h2 className="text-xl font-bold mb-5 text-white">Добавить драфт-пик</h2>
+            <form onSubmit={handleAddPick} className="space-y-4">
+
+              <div>
+                <label className="block text-[13px] font-semibold text-[#8e8e93] mb-1.5 uppercase">Год</label>
+                <input required type="number" value={pickFormData.year} onChange={e => setPickFormData({...pickFormData, year: Number(e.target.value)})} className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-semibold text-[#8e8e93] mb-1.5 uppercase">Описание пика</label>
+                <input required type="text" placeholder="например: 1-й раунд (Бостон) или 2-й раунд с защитой" value={pickFormData.name} onChange={e => setPickFormData({...pickFormData, name: e.target.value})} className="w-full p-3 bg-[#181818] border border-[#303030] rounded-xl text-white outline-none focus:border-[#3390ec]" />
+              </div>
+              <button type="submit" className="w-full bg-[#34c759] text-white py-3.5 rounded-xl font-bold hover:bg-[#2eb050] active:scale-[0.98] transition-transform">
+                Сохранить пик
               </button>
             </form>
           </div>

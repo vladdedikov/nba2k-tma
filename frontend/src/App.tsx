@@ -51,29 +51,29 @@ function App() {
     }
   };
 
-  const advanceYear = async () => {
+  const finishSeason = async () => {
     if (activeRole !== 'ADMIN') return;
-    if (!confirm('ВНИМАНИЕ! Это действие сдвинет контракты всех игроков на 1 год вперед и сделает истекающих игроков свободными агентами. Продолжить?')) return;
+    if (!confirm('Вы уверены, что хотите завершить текущий сезон?')) return;
     try {
-      await fetch('http://localhost:3000/admin/season/advance-year', {
+      await fetch('http://localhost:3000/admin/season/advance', {
         method: 'POST',
         headers: { 'x-user-role': activeRole }
       });
       setIsStageMenuOpen(false);
       fetchSettings();
-      alert('Сезон успешно переведен на следующий год!');
+      alert('Сезон успешно завершен! Сброс контрактов и рынка произведен.');
     } catch (e) {
       alert('Ошибка');
     }
   };
 
   const STAGES: Record<string, string> = {
-    'REGULAR_SEASON_START': '🏀 Старт сезона (нет обменов)',
-    'TRADE_RESTRICTIONS_LIFTED': '🟢 Сезон (Обмены открыты)',
-    'TRADE_DEADLINE': '🔒 Трейд-дедлайн / Плей-офф',
-    'OFFSEASON_OPTIONS': '📋 Межсезонье: Опции',
-    'DRAFT': '🎟 Драфт',
-    'FREE_AGENCY': '💼 Рынок СА'
+    'DRAFT': 'Драфт',
+    'OFFSEASON_OPTIONS': 'Опции контрактов',
+    'FREE_AGENCY': 'Рынок СА',
+    'REGULAR_SEASON_START': 'Старт сезона',
+    'TRADE_RESTRICTIONS_LIFTED': '2 месяца сезона',
+    'TRADE_DEADLINE': 'Дедлайн'
   };
 
   const currentStageName = settings ? (STAGES[settings.current_stage] || 'Сезон') : 'Загрузка...';
@@ -82,6 +82,7 @@ function App() {
     if (stage === 'TRADE_DEADLINE') return 'bg-[#ff3b30]/10 border-[#ff3b30]/30 text-[#ff3b30]';
     if (stage === 'OFFSEASON_OPTIONS' || stage === 'DRAFT') return 'bg-[#ff9f0a]/10 border-[#ff9f0a]/30 text-[#ff9f0a]';
     if (stage === 'FREE_AGENCY') return 'bg-[#34c759]/10 border-[#34c759]/30 text-[#34c759]';
+    if (stage === 'SEASON_END') return 'bg-[#34c759]/10 border-[#34c759]/30 text-[#34c759]';
     return 'bg-[#181818] border-[#303030] text-[#3390ec]';
   };
 
@@ -131,8 +132,8 @@ function App() {
                 </button>
               ))}
               <div className="h-px bg-[#303030] my-1"></div>
-              <button onClick={advanceYear} className="text-left p-3 text-[13px] font-bold rounded-lg text-[#ff3b30] hover:bg-[#ff3b30]/10 transition-colors">
-                ⏩ Завершить сезон (Advance Year)
+              <button onClick={finishSeason} className="text-left p-3 text-[13px] font-bold rounded-lg text-[#ff3b30] hover:bg-[#ff3b30]/10 transition-colors">
+                🏁 Завершить сезон
               </button>
             </div>
           )}

@@ -58,7 +58,7 @@ export default function TradeMachineTab() {
   const partnerTeam = safeTeamsArray.find(t => t.id === partnerTeamId);
 
   const getPlayersBySet = (team: any, ids: Set<string>) => (team?.players || []).filter((p: any) => ids.has(p.id));
-  const getPicksBySet = (team: any, ids: Set<string>) => (team?.current_picks || team?.currentPicks || []).filter((p: any) => ids.has(p.id));
+  const getPicksBySet = (team: any, ids: Set<string>) => (team?.picks || []).filter((p: any) => ids.has(p.id));
 
   const myOutgoingPlayers = getPlayersBySet(myTeam, selectedMyPlayers);
   const myIncomingPlayers = getPlayersBySet(partnerTeam, selectedPartnerPlayers);
@@ -90,6 +90,7 @@ export default function TradeMachineTab() {
 
   const myValidation = validateSide(myPayroll, myOutgoingSalary, myIncomingSalary);
   const partnerValidation = validateSide(partnerPayroll, partnerOutgoingSalary, partnerIncomingSalary);
+  const isTradeDeadline = settings?.current_stage === 'TRADE_DEADLINE';
   const isValid = myValidation.valid && partnerValidation.valid;
 
   const toggleSet = (set: Set<string>, id: string, setter: any) => {
@@ -100,6 +101,7 @@ export default function TradeMachineTab() {
   };
 
   const handleSendOffer = async () => {
+    if (isTradeDeadline) return alert('Дедлайн наступил! Обмены закрыты на время плей-офф.');
     if (!isValid) return alert('Обмен невалиден');
     try {
       await fetch('http://localhost:3000/trades/offer', {
@@ -144,8 +146,6 @@ export default function TradeMachineTab() {
     }
   };
 
-  const isTradeDeadline = settings?.current_stage === 'TRADE_DEADLINE';
-
   if (loading) return (
     <div className="p-8 h-full flex flex-col items-center justify-center text-[#8e8e93]">
       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#3390ec] mb-4"></div>
@@ -155,6 +155,19 @@ export default function TradeMachineTab() {
 
   return (
     <div className="flex flex-col h-full bg-[#181818] pb-[100px]">
+      
+      {/* Banners */}
+      {settings?.current_stage === 'TRADE_DEADLINE' && (
+        <div className="bg-[#ff3b30]/10 border-b border-[#ff3b30]/30 p-3 text-center text-[12px] font-bold text-[#ff3b30] flex items-center justify-center gap-1.5">
+          🔒 Дедлайн наступил! Обмены закрыты на время плей-офф.
+        </div>
+      )}
+      {settings?.current_stage === 'REGULAR_SEASON_START' && (
+        <div className="bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/30 p-3 text-center text-[12px] font-bold text-[#ff9f0a]">
+          ⚠️ Действует 2-месячный мораторий на обмен новичков и свежих подписаний.
+        </div>
+      )}
+
       <div className="flex bg-[#212121] p-2 gap-2 shadow-sm sticky top-0 z-10 border-b border-[#303030]">
         <button onClick={() => setSubTab('BUILDER')} className={`flex-1 py-2 rounded-xl text-[13px] font-bold transition-colors ${subTab === 'BUILDER' ? 'bg-[#3390ec] text-white' : 'text-[#8e8e93] hover:bg-[#303030]'}`}>
           Конструктор
@@ -205,7 +218,7 @@ export default function TradeMachineTab() {
                   })}
                   {(myTeam?.current_picks || myTeam?.currentPicks || []).map((p: any) => (
                     <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
-                      <div className="font-bold">Пик {p.year} R{p.round}</div>
+                      <div className="font-bold">🎟 {p.year}: {p.name}</div>
                     </div>
                   ))}
                 </div>
@@ -233,9 +246,9 @@ export default function TradeMachineTab() {
                       </div>
                     );
                   })}
-                  {(partnerTeam?.current_picks || partnerTeam?.currentPicks || []).map((p: any) => (
+                  {(partnerTeam?.picks || []).map((p: any) => (
                     <div key={p.id} onClick={() => !isTradeDeadline && toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent'}`}>
-                      <div className="font-bold">Пик {p.year} R{p.round}</div>
+                      <div className="font-bold">🎟 {p.year}: {p.name}</div>
                     </div>
                   ))}
                 </div>
@@ -279,7 +292,7 @@ export default function TradeMachineTab() {
                   key={o.id} 
                   offer={o} 
                   allPlayers={safeTeamsArray.flatMap((t: any) => t.players || [])} 
-                  allPicks={safeTeamsArray.flatMap((t: any) => t.currentPicks || t.current_picks || [])}
+                  allPicks={safeTeamsArray.flatMap((t: any) => t.picks || [])}
                   respondToOffer={respondToOffer} 
                   isTradeDeadline={isTradeDeadline}
                 />
@@ -325,7 +338,7 @@ function OfferCard({ offer, allPlayers, allPicks, respondToOffer, isTradeDeadlin
     const items = [];
     if (players[0]) items.push(players[0].name);
     if (players[1]) items.push(players[1].name);
-    if (items.length === 0 && picks[0]) items.push(`Пик ${picks[0].year} R${picks[0].round}`);
+    if (items.length === 0 && picks[0]) items.push(`${picks[0].year}: ${picks[0].name}`);
     if (players.length + picks.length > items.length) items.push(`еще ${players.length + picks.length - items.length}`);
     return items.join(', ') || 'Ничего';
   };
@@ -385,7 +398,7 @@ function OfferCard({ offer, allPlayers, allPicks, respondToOffer, isTradeDeadlin
                 ))}
                 {aReceivesPicks.map((p: any, i: number) => (
                   <div key={i} className="flex justify-between items-center text-[13px]">
-                    <span className="text-white">Пик {p.year} Раунд {p.round}</span>
+                    <span className="text-white">🎟 {p.year}: {p.name}</span>
                     <span className="text-[#8e8e93] text-[10px]">DRAFT</span>
                   </div>
                 ))}
@@ -414,7 +427,7 @@ function OfferCard({ offer, allPlayers, allPicks, respondToOffer, isTradeDeadlin
                 ))}
                 {bReceivesPicks.map((p: any, i: number) => (
                   <div key={i} className="flex justify-between items-center text-[13px]">
-                    <span className="text-white">Пик {p.year} Раунд {p.round}</span>
+                    <span className="text-white">🎟 {p.year}: {p.name}</span>
                     <span className="text-[#8e8e93] text-[10px]">DRAFT</span>
                   </div>
                 ))}

@@ -131,17 +131,13 @@ async function main() {
   const currentYear = new Date().getFullYear();
   const picksData = [];
 
-  let pickNumber = 1;
   for (const team of teams) {
     for (let year = currentYear; year <= currentYear + 1; year++) {
       for (let round = 1; round <= 2; round++) {
         picksData.push({
-          original_team_id: team.id,
-          current_team_id: team.id,
+          name: `${round}-й раунд`,
           year,
-          round,
-          pick_number: year === currentYear && round === 1 ? pickNumber++ : 1,
-          protected_rules: round === 1 ? 'Top 3 Protected' : null,
+          team_id: team.id,
         });
       }
     }

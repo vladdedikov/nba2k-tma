@@ -22,8 +22,7 @@ fastify.get('/teams', async (request, reply) => {
     include: { 
       players: true, 
       owner: true,
-      current_picks: true,
-      original_picks: true
+      draft_picks: true
     } 
   });
   // Map snake_case from DB to camelCase if frontend expects it, or just return as is
@@ -144,7 +143,7 @@ fastify.post('/admin/players/:id/transfer', async (request, reply) => {
 const checkTradesAllowed = async (reply: any, playerIds: string[] = []) => {
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
   if (settings?.current_stage === 'TRADE_DEADLINE') {
-    reply.status(400).send({ error: 'Трейд-дедлайн уже наступил! Обмены заблокированы до открытия межсезонья.' });
+    reply.status(400).send({ error: 'Дедлайн наступил! Обмены закрыты на время плей-офф' });
     return false;
   }
   if (playerIds.length > 0) {
@@ -236,20 +235,53 @@ fastify.patch('/admin/league/stage', async (request, reply) => {
   if (stage === 'TRADE_RESTRICTIONS_LIFTED') {
     await prisma.player.updateMany({ where: { is_trade_restricted: true }, data: { is_trade_restricted: false } });
   }
-  if (stage === 'FREE_AGENCY') {
-    const freeAgents = await prisma.player.findMany({
-      where: { team_id: null, is_prospect: false },
-      orderBy: { overall_rating: 'desc' }
-    });
-    
-    // Assign 12 per block
-    const updates = freeAgents.map((p, i) => {
-      const block = Math.floor(i / 12) + 1;
-      return prisma.player.update({ where: { id: p.id }, data: { fa_block: block } });
-    });
-    await prisma.$transaction(updates);
-  }
   await prisma.leagueSettings.update({ where: { id: 1 }, data: { current_stage: stage } });
+  return { success: true };
+});
+
+fastify.post('/admin/season/advance', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+
+  const players = await prisma.player.findMany({ where: { team_id: { not: null } } });
+  const updates = players.map(p => {
+    let newSalaries = [...p.salaries];
+    let newLeft = p.contract_years_left;
+    if (newLeft > 0) {
+      newSalaries = newSalaries.slice(1);
+      newLeft -= 1;
+    }
+    return prisma.player.update({
+      where: { id: p.id },
+      data: {
+        salaries: newSalaries,
+        contract_years_left: newLeft,
+        salary: newSalaries[0] || 0,
+        team_id: newLeft <= 0 ? null : p.team_id,
+        previous_team_id: newLeft <= 0 ? p.team_id : p.previous_team_id
+      }
+    });
+  });
+  
+  await prisma.$transaction([
+    ...updates,
+    prisma.draftPick.updateMany({
+      where: { year: { gt: new Date().getFullYear() - 5 } },
+      data: { year: { decrement: 1 } }
+    }),
+    prisma.faBlock.deleteMany(),
+    prisma.player.updateMany({ data: { fa_block_id: null } }),
+    prisma.leagueSettings.update({
+      where: { id: 1 },
+      data: {
+        current_stage: 'DRAFT',
+        current_block_number: 1,
+        approved_fa_blocks: [],
+        completed_fa_blocks: [],
+        current_block_deadline: null
+      }
+    })
+  ]);
+
   return { success: true };
 });
 
@@ -318,9 +350,9 @@ fastify.get('/draft/board', async (request, reply) => {
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
   const currentYear = new Date().getFullYear();
   const picks = await prisma.draftPick.findMany({
-    where: { year: currentYear, round: 1 },
-    orderBy: { pick_number: 'asc' },
-    include: { current_team: true }
+    where: { year: currentYear },
+    orderBy: { id: 'asc' },
+    include: { team: true }
   });
   return { picks, settings };
 });
@@ -349,16 +381,53 @@ fastify.delete('/admin/draft/prospects/:id', async (request, reply) => {
   return { success: true };
 });
 
+fastify.post('/admin/draft-picks', async (request, reply) => {
+  try {
+    if (!checkAdmin(request, reply)) return;
+    const { team_id, year, name } = request.body as any;
+    
+    const parsedTeamId = String(team_id || '').trim();
+    const parsedYear = Number(year);
+    const parsedName = String(name || '').trim();
+    
+    if (!parsedTeamId || !parsedYear || !parsedName) {
+      return reply.status(400).send({ error: "Заполните год и название пика" });
+    }
+    
+    const pick = await prisma.draftPick.create({
+      data: {
+        team_id: parsedTeamId,
+        year: parsedYear,
+        name: parsedName,
+      }
+    });
+    return reply.status(201).send({ success: true, pick });
+  } catch (error) {
+    console.error('Draft pick creation error:', error);
+    return reply.status(500).send({ error: 'Internal server error' });
+  }
+});
+
+fastify.delete('/admin/draft-picks/:id', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const { id } = request.params as any;
+  await prisma.draftPick.delete({ where: { id: Number(id) } });
+  return { success: true };
+});
+
 fastify.patch('/admin/draft/setup', async (request, reply) => {
   if (!checkAdmin(request, reply)) return;
-  const { picks } = request.body as any; // Array of { id, current_team_id }
+  const { picks } = request.body as any; 
   
   await prisma.$transaction(async (tx) => {
     for (let i = 0; i < picks.length; i++) {
-      await tx.draftPick.update({
-        where: { id: picks[i].id },
-        data: { pick_number: i + 1, current_team_id: picks[i].current_team_id }
-      });
+      const currentTeamId = picks[i].current_team_id || picks[i].team_id;
+      if (currentTeamId) {
+        await tx.draftPick.update({
+          where: { id: picks[i].id },
+          data: { team_id: currentTeamId }
+        });
+      }
     }
     await tx.leagueSettings.update({
       where: { id: 1 },
@@ -371,7 +440,7 @@ fastify.patch('/admin/draft/setup', async (request, reply) => {
 fastify.post('/draft/pick', async (request, reply) => {
   const { pick_id, player_id } = request.body as any;
   
-  const pick = await prisma.draftPick.findUnique({ where: { id: pick_id } });
+  const pick = await prisma.draftPick.findUnique({ where: { id: parseInt(pick_id, 10) } });
   const player = await prisma.player.findUnique({ where: { id: player_id } });
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
   
@@ -380,7 +449,7 @@ fastify.post('/draft/pick', async (request, reply) => {
   await prisma.player.update({
     where: { id: player_id },
     data: {
-      team_id: pick.current_team_id,
+      team_id: pick.team_id,
       is_prospect: false,
       is_trade_restricted: true,
       salary: 6000000,
@@ -391,8 +460,8 @@ fastify.post('/draft/pick', async (request, reply) => {
   });
   
   await prisma.draftPick.update({
-    where: { id: pick_id },
-    data: { is_used: true, selected_player_id: player_id }
+    where: { id: pick.id },
+    data: { is_used: true }
   });
   
   const nextIndex = settings.current_draft_pick_index + 1;
@@ -415,40 +484,134 @@ fastify.get('/free-agency/players', async (request, reply) => {
   });
 });
 
-fastify.get('/free-agency/blocks', async (request, reply) => {
-  const role = request.headers['x-user-role'];
-  const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
-  
-  // Find max block number
-  const faCount = await prisma.player.count({ where: { team_id: null, is_prospect: false } });
-  const totalBlocks = Math.ceil(faCount / 12);
-  
-  const blocks = [];
-  for (let i = 1; i <= totalBlocks; i++) {
-    const isApproved = settings?.approved_fa_blocks.includes(i);
-    if (role === 'ADMIN' || isApproved) {
-      blocks.push({
-        number: i,
-        is_approved: isApproved,
-        is_active: settings?.current_block_number === i,
-        deadline: settings?.current_block_number === i ? settings?.current_block_deadline : null
-      });
-    }
-  }
-  return blocks;
+fastify.get('/admin/free-agency/unassigned-players', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  return await prisma.player.findMany({
+    where: { team_id: null, is_prospect: false, fa_block_id: null },
+    orderBy: { overall_rating: 'desc' }
+  });
 });
 
-fastify.get('/free-agency/blocks/:blockNumber', async (request, reply) => {
-  const { blockNumber } = request.params as any;
-  const num = parseInt(blockNumber);
+fastify.post('/admin/free-agency/blocks', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const block = await prisma.$transaction(async (tx) => {
+    const count = await tx.faBlock.count();
+    return await tx.faBlock.create({
+      data: { number: count + 1 }
+    });
+  });
+  return block;
+});
+
+fastify.delete('/admin/free-agency/blocks/:blockId', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const { blockId } = request.params as any;
+  const id = parseInt(blockId);
   
-  const players = await prisma.player.findMany({
-    where: { team_id: null, is_prospect: false, fa_block: num },
-    orderBy: { overall_rating: 'desc' },
-    include: { contract_offers: { include: { team: true } } }
+  const updatedBlocks = await prisma.$transaction(async (tx) => {
+    // 1. Unassign players
+    await tx.player.updateMany({
+      where: { fa_block_id: id },
+      data: { fa_block_id: null }
+    });
+    // 2. Delete block
+    await tx.faBlock.deleteMany({ where: { id } });
+    
+    // 3. Renumber remaining
+    const remaining = await tx.faBlock.findMany({ orderBy: { number: 'asc' } });
+    for (let i = 0; i < remaining.length; i++) {
+      await tx.faBlock.update({
+        where: { id: remaining[i].id },
+        data: { number: i + 1 }
+      });
+    }
+    return await tx.faBlock.findMany({ orderBy: { number: 'asc' } });
+  });
+  return updatedBlocks;
+});
+
+fastify.post('/admin/free-agency/blocks/:blockId/add-player', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const { blockId } = request.params as any;
+  const { player_id } = request.body as any;
+  await prisma.player.update({
+    where: { id: player_id },
+    data: { fa_block_id: parseInt(blockId) }
+  });
+  return { success: true };
+});
+
+fastify.post('/admin/free-agency/blocks/:blockId/remove-player', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const { player_id } = request.body as any;
+  await prisma.player.update({
+    where: { id: player_id },
+    data: { fa_block_id: null }
+  });
+  return { success: true };
+});
+
+fastify.post('/admin/free-agency/blocks/:blockId/start', async (request, reply) => {
+  if (!checkAdmin(request, reply)) return;
+  const { blockId } = request.params as any;
+  const { days = 0, minutes = 30 } = request.body as any;
+  
+  const block = await prisma.faBlock.findUnique({ where: { id: parseInt(blockId) } });
+  if (!block) return reply.status(404).send({ error: 'Block not found' });
+
+  const durationMs = (days * 1440 + minutes) * 60000;
+  const deadline = new Date(Date.now() + durationMs);
+  
+  await prisma.faBlock.update({
+    where: { id: parseInt(blockId) },
+    data: { status: 'ACTIVE', deadline }
+  });
+
+  const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
+  const newApproved = [...(settings?.approved_fa_blocks || []), block.number];
+  
+  await prisma.leagueSettings.update({
+    where: { id: 1 },
+    data: {
+      approved_fa_blocks: newApproved,
+      current_block_number: block.number,
+      current_block_deadline: deadline
+    }
   });
   
-  // Sort offers by total value
+  return { success: true };
+});
+
+fastify.get('/free-agency/blocks', async (request, reply) => {
+  const role = request.headers['x-user-role'];
+  const blocks = await prisma.faBlock.findMany({ orderBy: { number: 'asc' } });
+  
+  if (role === 'ADMIN') {
+    return blocks.map(b => ({
+      ...b,
+      is_approved: b.status !== 'PENDING',
+      is_active: b.status === 'ACTIVE',
+      is_completed: b.status === 'COMPLETED'
+    }));
+  } else {
+    return blocks.filter(b => b.status !== 'PENDING').map(b => ({
+      ...b,
+      is_approved: true,
+      is_active: b.status === 'ACTIVE',
+      is_completed: b.status === 'COMPLETED'
+    }));
+  }
+});
+
+fastify.get('/free-agency/blocks/:blockId', async (request, reply) => {
+  const { blockId } = request.params as any;
+  
+  const players = await prisma.player.findMany({
+    where: { fa_block_id: parseInt(blockId) },
+    orderBy: { overall_rating: 'desc' },
+    include: { contract_offers: { include: { team: true } }, team: true }
+  });
+  
   const playersWithSortedOffers = players.map(p => {
     const offers = p.contract_offers.sort((a, b) => {
       const totalA = a.salaries.length > 0 ? a.salaries.reduce((acc, v) => acc + v, 0) : a.annual_salary * a.years;
@@ -461,37 +624,15 @@ fastify.get('/free-agency/blocks/:blockNumber', async (request, reply) => {
   return playersWithSortedOffers;
 });
 
-fastify.post('/admin/free-agency/blocks/:blockNumber/approve', async (request, reply) => {
+fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, reply) => {
   if (!checkAdmin(request, reply)) return;
-  const { blockNumber } = request.params as any;
-  const { duration_minutes } = request.body as any;
-  const num = parseInt(blockNumber);
+  const { blockId } = request.params as any;
   
-  const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
-  const newApproved = [...(settings?.approved_fa_blocks || [])];
-  if (!newApproved.includes(num)) newApproved.push(num);
-  
-  const deadline = new Date(Date.now() + duration_minutes * 60000);
-  
-  await prisma.leagueSettings.update({
-    where: { id: 1 },
-    data: {
-      approved_fa_blocks: newApproved,
-      current_block_number: num,
-      current_block_deadline: deadline
-    }
-  });
-  
-  return { success: true };
-});
+  const block = await prisma.faBlock.findUnique({ where: { id: parseInt(blockId) } });
+  if (!block) return reply.status(404).send({ error: 'Block not found' });
 
-fastify.post('/admin/free-agency/blocks/:blockNumber/finalize', async (request, reply) => {
-  if (!checkAdmin(request, reply)) return;
-  const { blockNumber } = request.params as any;
-  const num = parseInt(blockNumber);
-  
   const players = await prisma.player.findMany({
-    where: { team_id: null, is_prospect: false, fa_block: num },
+    where: { fa_block_id: parseInt(blockId) },
     include: { contract_offers: { include: { team: true } } }
   });
   
@@ -534,14 +675,21 @@ fastify.post('/admin/free-agency/blocks/:blockNumber/finalize', async (request, 
     if (summaries.length > 0) {
       await tx.insiderPost.create({
         data: {
-          content: `🚨 Внимание, закрытие Рынка СА (Блок ${num})!\nВот итоговые подписания блока:\n${summaries.join('\n')}`
+          content: `🚨 Внимание, закрытие Рынка СА (Блок ${block.number})!\nВот итоговые подписания блока:\n${summaries.join('\n')}`
         }
       });
     }
+
+    await tx.faBlock.update({ where: { id: parseInt(blockId) }, data: { status: 'COMPLETED' } });
+    
+    const settings = await tx.leagueSettings.findUnique({ where: { id: 1 } });
+    const newCompleted = [...(settings?.completed_fa_blocks || [])];
+    if (!newCompleted.includes(block.number)) newCompleted.push(block.number);
     
     await tx.leagueSettings.update({
       where: { id: 1 },
       data: {
+        completed_fa_blocks: newCompleted,
         current_block_number: null,
         current_block_deadline: null
       }
@@ -556,8 +704,20 @@ fastify.post('/free-agency/offer', async (request, reply) => {
   const parsedSalaries = salaries ? salaries.map(Number) : [];
   const years = parsedSalaries.length;
   
-  const player = await prisma.player.findUnique({ where: { id: player_id } });
+  const player = await prisma.player.findUnique({ 
+    where: { id: player_id },
+    include: { fa_block: true }
+  });
   if (!player) return reply.status(404).send({ error: 'Player not found' });
+  if (!player.fa_block) return reply.status(400).send({ error: 'Игрок не в блоке' });
+
+  const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
+  if (!settings) return reply.status(500).send({ error: 'Settings not found' });
+  
+  if (player.fa_block.status !== 'ACTIVE') return reply.status(400).send({ error: 'Блок игрока не активен' });
+  if (player.fa_block.deadline && new Date() > new Date(player.fa_block.deadline)) {
+    return reply.status(400).send({ error: 'Дедлайн блока истек! Подача новых предложений заблокирована' });
+  }
 
   if (offer_type === 'ROOKIE_MAX') {
     if (!player.is_rfa) return reply.status(400).send({ error: 'Детский макс доступен исключительно для RFA-игроков!' });
