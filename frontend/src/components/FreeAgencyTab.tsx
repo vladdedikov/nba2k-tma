@@ -2,9 +2,16 @@ import { useState, useEffect } from 'react';
 import { DollarSign, BookOpen, Clock, AlertCircle, CheckCircle2, Plus, X } from 'lucide-react';
 import MemoTab from './MemoTab';
 
-type ContractType = 'CUSTOM' | 'MIN' | 'TAX_MLE' | 'FULL_MLE' | 'ROOKIE_MAX' | 'MEDIUM_MAX' | 'VETERAN_MAX' | 'SUPERMAX';
+type ContractType = 'CUSTOM' | 'MIN' | 'MINIMUM' | 'TAX_MLE' | 'FULL_MLE' | 'NON_TAX_MLE' | 'ROOKIE_MAX' | 'MEDIUM_MAX' | 'VETERAN_MAX' | 'SUPERMAX';
 
-export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeamId?: string }) {
+interface FreeAgencyTabProps {
+  role: string;
+  myTeamId?: string;
+  user?: any;
+  onRefreshUser?: () => Promise<void> | void;
+}
+
+export default function FreeAgencyTab({ role, myTeamId, user, onRefreshUser }: FreeAgencyTabProps) {
   const [mode, setMode] = useState<'VIEW' | 'BUILDER'>('VIEW');
   const [blocks, setBlocks] = useState<any[]>([]);
   const [activeBlockId, setActiveBlockId] = useState<number | null>(null);
@@ -16,6 +23,9 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   
   const [startDays, setStartDays] = useState(0);
   const [startMinutes, setStartMinutes] = useState(30);
+
+  const effectiveTeamId = myTeamId || user?.team_id || '';
+  const [adminSelectedTeamId, setAdminSelectedTeamId] = useState<string>('');
 
   // Modal State
   const [offerPlayer, setOfferPlayer] = useState<any>(null);
@@ -75,6 +85,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   };
 
   useEffect(() => {
+    if (onRefreshUser) onRefreshUser();
     fetchBaseData();
     if (role === 'ADMIN') fetchUnassigned();
   }, [role, mode]);
@@ -251,53 +262,66 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   };
 
   useEffect(() => {
-    setSalariesArr(prev => {
-      if (prev.length === offerYears) return prev;
-      const newArr = [...prev];
-      if (newArr.length < offerYears) {
-        const schedule = getScheduleForType(offerType);
-        while (newArr.length < offerYears) {
-          const idx = newArr.length;
-          const defaultVal = (offerType !== 'CUSTOM' && schedule && schedule[idx] !== undefined)
-            ? schedule[idx].toString()
-            : '';
-          newArr.push(defaultVal);
+    if (offerType !== 'CUSTOM') {
+      const schedule = getScheduleForType(offerType);
+      const newArr = Array.from({ length: offerYears }, (_, i) =>
+        schedule && schedule[i] !== undefined
+          ? schedule[i].toString()
+          : (schedule && schedule.length > 0 ? schedule[schedule.length - 1].toString() : '')
+      );
+      setSalariesArr(newArr);
+    } else {
+      setSalariesArr(prev => {
+        if (prev.length === offerYears) return prev;
+        const newArr = [...prev];
+        if (newArr.length < offerYears) {
+          while (newArr.length < offerYears) newArr.push('');
+        } else if (newArr.length > offerYears) {
+          newArr.length = offerYears;
         }
-      } else if (newArr.length > offerYears) {
-        newArr.length = offerYears;
-      }
-      return newArr;
-    });
-  }, [offerYears, offerType]);
+        return newArr;
+      });
+    }
+  }, [offerYears, offerType, settings]);
 
-  const getScheduleForType = (type: ContractType): number[] => {
+  const getScheduleForType = (type: ContractType | string): number[] => {
     if (!settings) return [];
     switch(type) {
-      case 'MIN': return settings.min_salary_schedule || [1.15, 1.25, 1.35, 1.45, 1.55];
-      case 'TAX_MLE': return settings.tax_mle_schedule || [5.3, 5.6, 5.9];
-      case 'FULL_MLE': return settings.full_mle_schedule || [12.9, 13.6, 14.3, 15.0];
-      case 'ROOKIE_MAX': return settings.rookie_max_schedule || [35.5, 38.3, 41.1, 44.0];
-      case 'MEDIUM_MAX': return settings.medium_max_schedule || [42.5, 45.9, 49.3, 52.7, 56.1];
-      case 'VETERAN_MAX': return settings.veteran_max_schedule || [50.0, 54.0, 58.0, 62.0, 66.0];
-      case 'SUPERMAX': return settings.supermax_schedule || [60.0, 64.8, 69.6, 74.4, 79.2];
-      default: return [];
+      case 'MIN':
+      case 'MINIMUM':
+        return settings.min_salary_schedule || [1.15, 1.25, 1.35, 1.45, 1.55];
+      case 'TAX_MLE':
+        return settings.tax_mle_schedule || [5.3, 5.6, 5.9];
+      case 'FULL_MLE':
+      case 'NON_TAX_MLE':
+        return settings.full_mle_schedule || [12.9, 13.6, 14.3, 15.0];
+      case 'ROOKIE_MAX':
+        return settings.rookie_max_schedule || [35.5, 38.3, 41.1, 44.0];
+      case 'MEDIUM_MAX':
+        return settings.medium_max_schedule || [42.5, 45.9, 49.3, 52.7, 56.1];
+      case 'VETERAN_MAX':
+        return settings.veteran_max_schedule || [50.0, 54.0, 58.0, 62.0, 66.0];
+      case 'SUPERMAX':
+        return settings.supermax_schedule || [60.0, 64.8, 69.6, 74.4, 79.2];
+      default:
+        return [];
     }
   };
 
   const handleTypeChange = (type: ContractType) => {
     setOfferType(type);
     
-    let targetYears = offerYears;
+    let targetYears = 4;
     let option: 'NONE' | 'PLAYER_OPTION' | 'TEAM_OPTION' = 'NONE';
 
-    if (type === 'MIN') {
+    if (type === 'MIN' || type === 'MINIMUM') {
       targetYears = 2; // Fixed 1+1 PO
       option = 'PLAYER_OPTION';
     } else if (type === 'TAX_MLE') {
       targetYears = 2; // Strictly 2 years
       option = 'NONE';
-    } else if (type === 'FULL_MLE') {
-      targetYears = Math.min(Math.max(offerYears, 1), 4);
+    } else if (type === 'FULL_MLE' || type === 'NON_TAX_MLE') {
+      targetYears = 4; // Default to 4 years
       option = 'NONE';
     } else if (type === 'ROOKIE_MAX') {
       if (!offerPlayer?.is_rfa) {
@@ -310,6 +334,10 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     } else if (type === 'MEDIUM_MAX' || type === 'VETERAN_MAX' || type === 'SUPERMAX') {
       targetYears = offerYears === 5 ? 5 : 4;
       option = 'NONE';
+    } else {
+      // CUSTOM
+      targetYears = offerYears ? Math.min(Math.max(offerYears, 1), 5) : 1;
+      option = lastYearOption;
     }
 
     setOfferYears(targetYears);
@@ -317,13 +345,23 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
 
     if (type !== 'CUSTOM') {
       const schedule = getScheduleForType(type);
-      if (schedule && schedule.length > 0) {
-        const newArr = Array(targetYears).fill('');
-        for (let i = 0; i < targetYears; i++) {
-          newArr[i] = schedule[i] !== undefined ? schedule[i].toString() : schedule[schedule.length - 1].toString();
-        }
-        setSalariesArr(newArr);
+      const newArr = Array(targetYears).fill('');
+      for (let i = 0; i < targetYears; i++) {
+        newArr[i] = (schedule && schedule[i] !== undefined)
+          ? schedule[i].toString()
+          : (schedule && schedule.length > 0 ? schedule[schedule.length - 1].toString() : '');
       }
+      setSalariesArr(newArr);
+    } else {
+      setSalariesArr(prev => {
+        const newArr = [...prev];
+        if (newArr.length < targetYears) {
+          while (newArr.length < targetYears) newArr.push('');
+        } else if (newArr.length > targetYears) {
+          newArr.length = targetYears;
+        }
+        return newArr;
+      });
     }
   };
 
@@ -331,13 +369,23 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     setOfferYears(y);
     if (offerType !== 'CUSTOM') {
       const schedule = getScheduleForType(offerType);
-      if (schedule && schedule.length > 0) {
-        const newArr = Array(y).fill('');
-        for (let i = 0; i < y; i++) {
-          newArr[i] = schedule[i] !== undefined ? schedule[i].toString() : schedule[schedule.length - 1].toString();
-        }
-        setSalariesArr(newArr);
+      const newArr = Array(y).fill('');
+      for (let i = 0; i < y; i++) {
+        newArr[i] = (schedule && schedule[i] !== undefined)
+          ? schedule[i].toString()
+          : (schedule && schedule.length > 0 ? schedule[schedule.length - 1].toString() : '');
       }
+      setSalariesArr(newArr);
+    } else {
+      setSalariesArr(prev => {
+        const newArr = [...prev];
+        if (newArr.length < y) {
+          while (newArr.length < y) newArr.push('');
+        } else if (newArr.length > y) {
+          newArr.length = y;
+        }
+        return newArr;
+      });
     }
   };
 
@@ -348,9 +396,9 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   };
 
   const availableYears = () => {
-    if (offerType === 'MIN') return [2];
+    if (offerType === 'MIN' || offerType === 'MINIMUM') return [2];
     if (offerType === 'TAX_MLE') return [2];
-    if (offerType === 'FULL_MLE') return [1, 2, 3, 4];
+    if (offerType === 'FULL_MLE' || offerType === 'NON_TAX_MLE') return [1, 2, 3, 4];
     if (offerType === 'ROOKIE_MAX') return [4];
     if (offerType === 'MEDIUM_MAX' || offerType === 'VETERAN_MAX' || offerType === 'SUPERMAX') return [4, 5];
     return [1, 2, 3, 4, 5];
@@ -364,18 +412,31 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const fifthYearSalary = offerYears === 5 ? (parseFloat(salariesArr[4]) || 0) * 1000000 : 0;
 
   const submitOffer = async () => {
-    if (!offerPlayer || !myTeamId) return;
+    const targetTeamId = effectiveTeamId || (role === 'ADMIN' ? (adminSelectedTeamId || teams[0]?.id) : '');
+    if (!offerPlayer || !targetTeamId) {
+      return alert('Команда для подачи оффера не определена');
+    }
     const parsedSalaries = salariesArr.map(s => parseFloat(s) * 1000000);
     if (parsedSalaries.some(s => isNaN(s) || s <= 0)) return alert('Заполните все зарплаты корректно');
     
     try {
       setLoading(true);
-      const res = await fetch('/api/free-agency/offer', {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-user-role': role
+      };
+      if (user?.id) headers['x-user-id'] = String(user.id);
+      if (user?.telegram_id) headers['x-telegram-id'] = String(user.telegram_id);
+      if (targetTeamId) headers['x-user-team-id'] = String(targetTeamId);
+
+      const res = await fetch('/api/free-agency/offers', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-role': role },
+        headers,
         body: JSON.stringify({
           player_id: offerPlayer.id,
-          team_id: myTeamId,
+          team_id: targetTeamId,
+          user_id: user?.id,
+          telegram_id: user?.telegram_id,
           offer_type: offerType,
           salaries: parsedSalaries,
           last_year_option: lastYearOption
@@ -392,11 +453,12 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
       if (activeBlockId) await fetchBlockPlayers(activeBlockId);
     } catch (e: any) {
       alert(e.message);
+    } finally {
       setLoading(false);
     }
   };
 
-  const myTeam = teams.find(t => t.id === myTeamId);
+  const myTeam = teams.find(t => t.id === (effectiveTeamId || adminSelectedTeamId));
   const activeBlockData = blocks.find(b => b.id === activeBlockId);
 
   return (
@@ -586,7 +648,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                         <div className="text-center py-8 text-[#8e8e93] font-bold">Нет игроков в этом блоке.</div>
                       ) : players.map(p => {
                         const topOffer = p.contract_offers?.[0];
-                        const isMyRFA = p.is_rfa && p.previous_team_id === myTeamId;
+                        const isMyRFA = p.is_rfa && p.previous_team_id === effectiveTeamId;
                         const hasOffer = !!topOffer;
                         const canMatch = isMyRFA && hasOffer && topOffer.status === 'PENDING' && !isExpired && activeBlockData?.is_active;
                         const previousTeamName = teams.find(t => t.id === p.previous_team_id)?.name;
@@ -707,15 +769,19 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                                   ) : (
                                     <div className="flex gap-2">
                                       <button 
-                                        onClick={() => {
+                                        onClick={async () => {
+                                          if (onRefreshUser) await onRefreshUser();
                                           setOfferPlayer(p);
                                           setOfferType('CUSTOM');
                                           setSalariesArr(['']);
                                           setOfferYears(1);
                                           setLastYearOption('NONE');
+                                          if (role === 'ADMIN' && !effectiveTeamId && teams.length > 0) {
+                                            setAdminSelectedTeamId(teams[0].id);
+                                          }
                                         }} 
-                                        disabled={!myTeamId || isExpired || !activeBlockData?.is_active}
-                                        className={`flex-1 py-2.5 font-bold rounded-xl text-[12px] active:scale-[0.98] transition-colors ${!myTeamId || isExpired || !activeBlockData?.is_active ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#3390ec]/10 text-[#3390ec]'}`}
+                                        disabled={(!effectiveTeamId && role !== 'ADMIN') || isExpired || !activeBlockData?.is_active}
+                                        className={`flex-1 py-2.5 font-bold rounded-xl text-[12px] active:scale-[0.98] transition-colors ${(!effectiveTeamId && role !== 'ADMIN') || isExpired || !activeBlockData?.is_active ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#3390ec]/10 text-[#3390ec]'}`}
                                       >
                                         Сделать оффер
                                       </button>
@@ -740,7 +806,22 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-[#212121] border border-[#303030] w-full max-w-sm rounded-2xl p-4 flex flex-col shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="text-[15px] font-bold text-white mb-1">Оффер для {offerPlayer.name}</div>
-            <div className="text-[12px] text-[#8e8e93] mb-4">Команда: {myTeam?.name || 'Неизвестно'}</div>
+            {role === 'ADMIN' ? (
+              <div className="mb-4">
+                <label className="text-[12px] font-bold text-[#8e8e93] block mb-1">Команда для оффера (Администратор)</label>
+                <select
+                  value={adminSelectedTeamId || effectiveTeamId || (teams[0]?.id ?? '')}
+                  onChange={e => setAdminSelectedTeamId(e.target.value)}
+                  className="w-full bg-[#181818] border border-[#303030] p-2 rounded-lg text-white text-[13px] outline-none font-bold"
+                >
+                  {teams.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="text-[12px] text-[#8e8e93] mb-4">Команда: {myTeam?.name || 'Не назначена'}</div>
+            )}
             
             <div className="space-y-4 mb-6">
               
@@ -752,13 +833,13 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                   className="w-full bg-[#181818] border border-[#303030] p-2.5 rounded-lg text-white text-[13px] outline-none font-bold"
                 >
                   <option value="CUSTOM">Кастомный (Настраиваемый)</option>
-                  <option value="MIN">Минимум</option>
-                  <option value="TAX_MLE">Tax MLE</option>
-                  <option value="FULL_MLE">Full MLE</option>
+                  <option value="MIN">Минимум (1+1 PO)</option>
+                  <option value="TAX_MLE">Tax MLE (Налоговое, 2 года)</option>
+                  <option value="FULL_MLE">Полное MLE (Non-Taxpayer MLE, до 4 лет)</option>
                   <option value="ROOKIE_MAX" disabled={!offerPlayer.is_rfa}>Детский макс (Только RFA)</option>
                   <option value="MEDIUM_MAX">Средний макс</option>
                   <option value="VETERAN_MAX">Взрослый макс</option>
-                  {offerPlayer.previous_team_id === myTeamId && (
+                  {offerPlayer.previous_team_id === (effectiveTeamId || adminSelectedTeamId) && (
                     <option value="SUPERMAX">Супермакс</option>
                   )}
                 </select>
@@ -774,7 +855,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                       onClick={() => handleYearsChange(y)} 
                       className={`flex-1 py-2 rounded-lg text-[13px] font-bold transition-colors ${offerYears === y ? 'bg-[#3390ec] text-white' : 'bg-[#181818] border border-[#303030] text-[#8e8e93]'}`}
                     >
-                      {offerType === 'MIN' ? '2 года (1+1 PO)' : `${y} ${y === 1 ? 'год' : y >= 5 ? 'лет' : 'года'}`}
+                      {(offerType === 'MIN' || offerType === 'MINIMUM') ? '2 года (1+1 PO)' : `${y} ${y === 1 ? 'год' : y >= 5 ? 'лет' : 'года'}`}
                     </button>
                   ))}
                 </div>
@@ -788,7 +869,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                 <div className="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
-                    disabled={offerType === 'MIN'}
+                    disabled={offerType === 'MIN' || offerType === 'MINIMUM'}
                     onClick={() => setLastYearOption('NONE')}
                     className={`py-2 px-1 rounded-lg text-[11px] font-bold transition-colors ${
                       lastYearOption === 'NONE'
@@ -811,7 +892,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                   </button>
                   <button
                     type="button"
-                    disabled={offerType === 'MIN'}
+                    disabled={offerType === 'MIN' || offerType === 'MINIMUM'}
                     onClick={() => setLastYearOption('TEAM_OPTION')}
                     className={`py-2 px-1 rounded-lg text-[11px] font-bold transition-colors ${
                       lastYearOption === 'TEAM_OPTION'

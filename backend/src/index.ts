@@ -55,6 +55,62 @@ const getTeamsHandler = async (request: any, reply: any) => {
 fastify.get('/teams', getTeamsHandler);
 fastify.get('/api/teams', getTeamsHandler);
 
+// Helper to retrieve authenticated user from request (headers, body, or initData)
+const getAuthUser = async (request: any) => {
+  try {
+    const rawUserId = request.headers['x-user-id'] || request.body?.user_id;
+    if (rawUserId) {
+      const u = await prisma.user.findUnique({
+        where: { id: Number(rawUserId) },
+        include: { team: true }
+      });
+      if (u) return u;
+    }
+
+    const rawTgId = request.headers['x-telegram-id'] || request.body?.telegram_id;
+    if (rawTgId) {
+      const u = await prisma.user.findUnique({
+        where: { telegram_id: BigInt(rawTgId) },
+        include: { team: true }
+      });
+      if (u) return u;
+    }
+
+    const initDataHeader = request.headers['x-telegram-init-data'];
+    if (initDataHeader && typeof initDataHeader === 'string') {
+      const params = new URLSearchParams(initDataHeader);
+      const userStr = params.get('user');
+      if (userStr) {
+        try {
+          const parsed = JSON.parse(userStr);
+          if (parsed.id) {
+            const u = await prisma.user.findUnique({
+              where: { telegram_id: BigInt(parsed.id) },
+              include: { team: true }
+            });
+            if (u) return u;
+          }
+        } catch {}
+      }
+    }
+
+    const username = request.headers['x-username'] || request.body?.username;
+    if (username) {
+      const clean = String(username).replace('@', '').toLowerCase();
+      const u = await prisma.user.findFirst({
+        where: { username: clean },
+        include: { team: true }
+      });
+      if (u) return u;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Error in getAuthUser:', err);
+    return null;
+  }
+};
+
 // Role check middleware/helper
 const checkAdmin = (request: any, reply: any) => {
   const role = request.headers['x-user-role'];
@@ -66,11 +122,14 @@ const checkAdmin = (request: any, reply: any) => {
 };
 
 // Team permission check helper: Admin or specific team GM
-const checkUserTeamPermission = (request: any, reply: any, targetTeamId: string) => {
-  const role = request.headers['x-user-role'];
-  if (role === 'ADMIN') return true;
+const checkUserTeamPermission = async (request: any, reply: any, targetTeamId: string) => {
+  const headerRole = request.headers['x-user-role'];
+  if (headerRole === 'ADMIN') return true;
 
-  const userTeamId = request.headers['x-user-team-id'] || request.body?.user_team_id || request.body?.my_team_id;
+  const authUser = await getAuthUser(request);
+  if (authUser?.role === 'ADMIN') return true;
+
+  const userTeamId = authUser?.team_id || request.headers['x-user-team-id'] || request.body?.user_team_id || request.body?.my_team_id;
   if (!userTeamId) {
     reply.status(403).send({ error: 'Зрители без команды не могут совершать действия! Дождитесь назначения клуба комиссионером.' });
     return false;
@@ -138,11 +197,36 @@ const telegramSyncHandler = async (request: any, reply: any) => {
 fastify.post('/auth/telegram-sync', telegramSyncHandler);
 fastify.post('/api/auth/telegram-sync', telegramSyncHandler);
 
+const getMeHandler = async (request: any, reply: any) => {
+  const user = await getAuthUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Пользователь не авторизован' });
+  }
+  return {
+    id: user.id,
+    telegram_id: Number(user.telegram_id),
+    username: user.username,
+    first_name: user.first_name,
+    role: user.role,
+    team_id: user.team_id,
+    team: user.team
+  };
+};
+
+fastify.get('/auth/me', getMeHandler);
+fastify.get('/api/auth/me', getMeHandler);
+
 // Admin Users Management
 const adminGetUsersHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
 
   const users = await prisma.user.findMany({
+    where: {
+      telegram_id: { gt: BigInt(0) },
+      NOT: {
+        username: { in: ['nba_player_gm', 'guest_fan', 'test_gm', 'placeholder'] }
+      }
+    },
     include: { team: true },
     orderBy: { id: 'asc' }
   });
@@ -397,7 +481,7 @@ fastify.get('/api/trades', getTradesHandler);
 
 const createTradeOfferHandler = async (request: any, reply: any) => {
   const data = request.body as any;
-  if (!checkUserTeamPermission(request, reply, data.sender_team_id)) return;
+  if (!(await checkUserTeamPermission(request, reply, data.sender_team_id))) return;
 
   const playerIds = [...(data.sent_player_ids || []), ...(data.received_player_ids || [])];
   if (!(await checkTradesAllowed(reply, playerIds))) return;
@@ -431,7 +515,7 @@ const respondTradeOfferHandler = async (request: any, reply: any) => {
   if (!trade) return reply.status(404).send({ error: 'Trade not found' });
   if (trade.status !== 'PENDING') return reply.status(400).send({ error: 'Trade is not pending' });
 
-  if (!checkUserTeamPermission(request, reply, trade.receiver_team_id)) return;
+  if (!(await checkUserTeamPermission(request, reply, trade.receiver_team_id))) return;
 
   if (action === 'REJECT') {
     return await prisma.tradeOffer.update({ where: { id }, data: { status: 'REJECTED' } });
@@ -897,7 +981,7 @@ const draftPickHandler = async (request: any, reply: any) => {
     return reply.status(400).send({ error: 'Этот пик уже использован!' });
   }
 
-  if (!checkUserTeamPermission(request, reply, pick.team_id)) return;
+  if (!(await checkUserTeamPermission(request, reply, pick.team_id))) return;
 
   // Назначение игрока
   await prisma.player.update({
@@ -1265,7 +1349,22 @@ fastify.post('/api/admin/free-agency/blocks/:blockId/finalize', finalizeBlockHan
 
 const createFaOfferHandler = async (request: any, reply: any) => {
   const { player_id, team_id, offer_type, salaries, last_year_option } = request.body as any;
-  if (!checkUserTeamPermission(request, reply, team_id)) return;
+
+  // 1. Identify user by auth and query fresh record from database
+  const currentUser = await getAuthUser(request);
+  const headerRole = request.headers['x-user-role'];
+  const isAdmin = headerRole === 'ADMIN' || currentUser?.role === 'ADMIN';
+
+  // 2. Check permissions strictly on fresh DB record
+  if (!currentUser || (!currentUser.team_id && !isAdmin)) {
+    return reply.status(403).send({ error: 'Зрители без команды не могут совершать действия на рынке' });
+  }
+
+  // 3. For regular GM, team_id is strictly from DB (currentUser.team_id). Admin can choose team_id or use currentUser.team_id.
+  const effectiveTeamId = isAdmin ? (team_id || currentUser.team_id) : currentUser.team_id;
+  if (!effectiveTeamId) {
+    return reply.status(400).send({ error: 'Не указана команда для подачи предложения' });
+  }
 
   const parsedSalaries = salaries ? salaries.map(Number) : [];
   const years = parsedSalaries.length;
@@ -1285,12 +1384,23 @@ const createFaOfferHandler = async (request: any, reply: any) => {
     return reply.status(400).send({ error: 'Дедлайн блока истек! Подача новых предложений заблокирована' });
   }
 
+  if (['NON_TAX_MLE', 'FULL_MLE'].includes(offer_type)) {
+    if (years < 1 || years > 4) {
+      return reply.status(400).send({ error: 'Полное MLE (Non-Taxpayer MLE) может быть от 1 до 4 лет' });
+    }
+  }
+  if (offer_type === 'TAX_MLE') {
+    if (years !== 2) return reply.status(400).send({ error: 'Налоговое MLE (Tax MLE) строго 2 года' });
+  }
+  if (['MIN', 'MINIMUM'].includes(offer_type)) {
+    if (years !== 2) return reply.status(400).send({ error: 'Минимальный контракт строго 2 года (1+1 с опцией игрока)' });
+  }
   if (offer_type === 'ROOKIE_MAX') {
     if (!player.is_rfa) return reply.status(400).send({ error: 'Детский макс доступен исключительно для RFA-игроков!' });
     if (years !== 4) return reply.status(400).send({ error: 'Детский макс строго 4 года' });
   }
   if (offer_type === 'SUPERMAX') {
-    if (player.previous_team_id !== team_id) return reply.status(400).send({ error: 'Супермакс может предложить только родная команда' });
+    if (player.previous_team_id !== effectiveTeamId) return reply.status(400).send({ error: 'Супермакс может предложить только родная команда' });
   }
   if (['MEDIUM_MAX', 'VETERAN_MAX', 'SUPERMAX'].includes(offer_type) && (years < 4 || years > 5)) {
     return reply.status(400).send({ error: 'Макс. контракт должен быть 4-5 лет' });
@@ -1302,12 +1412,12 @@ const createFaOfferHandler = async (request: any, reply: any) => {
 
   const cleanLastYearOption = ['NONE', 'PLAYER_OPTION', 'TEAM_OPTION'].includes(last_year_option)
     ? last_year_option
-    : (offer_type === 'MIN' ? 'PLAYER_OPTION' : 'NONE');
+    : (['MIN', 'MINIMUM'].includes(offer_type) ? 'PLAYER_OPTION' : 'NONE');
 
   const offer = await prisma.contractOffer.create({
     data: { 
       player_id, 
-      team_id, 
+      team_id: effectiveTeamId, 
       years, 
       annual_salary: parsedSalaries[0] || 0,
       salaries: parsedSalaries,
@@ -1320,6 +1430,8 @@ const createFaOfferHandler = async (request: any, reply: any) => {
 
 fastify.post('/free-agency/offer', createFaOfferHandler);
 fastify.post('/api/free-agency/offer', createFaOfferHandler);
+fastify.post('/free-agency/offers', createFaOfferHandler);
+fastify.post('/api/free-agency/offers', createFaOfferHandler);
 
 fastify.post('/free-agency/offers/:offerId/match', async (request, reply) => {
   const { offerId } = request.params as any;

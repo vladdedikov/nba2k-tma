@@ -23,30 +23,6 @@ interface CurrentUser {
   } | null;
 }
 
-const TEST_USERS = [
-  {
-    key: 'admin',
-    label: '👑 Админ @smthing69else',
-    telegram_id: 777777777,
-    username: 'smthing69else',
-    first_name: 'Комиссионер'
-  },
-  {
-    key: 'celtics_gm',
-    label: '🏀 ГМ Celtics @nba_player_gm',
-    telegram_id: 123456789,
-    username: 'nba_player_gm',
-    first_name: 'Alex'
-  },
-  {
-    key: 'guest',
-    label: '👀 Зритель @guest_fan',
-    telegram_id: 999999999,
-    username: 'guest_fan',
-    first_name: 'Гость'
-  }
-];
-
 function App() {
   const [activeTab, setActiveTab] = useState('rosters');
   const [activeRole, setActiveRole] = useState<'PLAYER' | 'ADMIN'>('PLAYER');
@@ -58,7 +34,6 @@ function App() {
   // Telegram TMA & User State
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [isTelegramEnv, setIsTelegramEnv] = useState(false);
-  const [selectedTestUserKey, setSelectedTestUserKey] = useState<string>('admin');
 
   // Season Selection State
   const [isSeasonConfirmOpen, setIsSeasonConfirmOpen] = useState(false);
@@ -86,6 +61,36 @@ function App() {
     }
   };
 
+  const refreshUser = async () => {
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      const tgUser = tg?.initDataUnsafe?.user;
+      if (tgUser && tgUser.id) {
+        await syncTelegramUser({
+          telegram_id: tgUser.id,
+          username: tgUser.username,
+          first_name: tgUser.first_name
+        });
+      } else if (currentUser?.telegram_id) {
+        await syncTelegramUser({
+          telegram_id: currentUser.telegram_id,
+          username: currentUser.username,
+          first_name: currentUser.first_name
+        });
+      } else {
+        // Browser fallback: commissioner
+        await syncTelegramUser({
+          telegram_id: 637622847,
+          username: 'smthing69else',
+          first_name: 'Vlad'
+        });
+      }
+      await fetchSettings();
+    } catch (e) {
+      console.error('refreshUser error:', e);
+    }
+  };
+
   // TMA SDK Initialization
   useEffect(() => {
     const tg = (window as any).Telegram?.WebApp;
@@ -105,13 +110,12 @@ function App() {
         first_name: tgUser.first_name
       });
     } else {
-      // In browser mode: initialize default commissioner
+      // In browser mode: fallback to commissioner @smthing69else
       setIsTelegramEnv(false);
-      const defaultUser = TEST_USERS[0];
       syncTelegramUser({
-        telegram_id: defaultUser.telegram_id,
-        username: defaultUser.username,
-        first_name: defaultUser.first_name
+        telegram_id: 637622847,
+        username: 'smthing69else',
+        first_name: 'Vlad'
       });
     }
   }, []);
@@ -143,20 +147,10 @@ function App() {
 
   useEffect(() => {
     fetchSettings();
-  }, [activeTab, currentUser?.id]);
-
-  const handleTestUserChange = async (key: string) => {
-    setSelectedTestUserKey(key);
-    const target = TEST_USERS.find(u => u.key === key);
-    if (target) {
-      await syncTelegramUser({
-        telegram_id: target.telegram_id,
-        username: target.username,
-        first_name: target.first_name
-      });
-      await fetchSettings();
+    if (activeTab === 'fa') {
+      refreshUser();
     }
-  };
+  }, [activeTab, currentUser?.id]);
 
   const changeStage = async (stage: string) => {
     if (activeRole !== 'ADMIN') return;
@@ -273,20 +267,6 @@ function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Browser Test User Selector */}
-            {!isTelegramEnv && (
-              <select
-                value={selectedTestUserKey}
-                onChange={e => handleTestUserChange(e.target.value)}
-                className="bg-[#181818] border border-[#303030] rounded-lg px-2 py-1 text-[11px] font-bold text-white outline-none focus:border-[#3390ec]"
-                title="Тестовый пользователь для отладки без Telegram"
-              >
-                {TEST_USERS.map(u => (
-                  <option key={u.key} value={u.key}>{u.label}</option>
-                ))}
-              </select>
-            )}
-
             {/* Admin Quick Action Buttons */}
             {activeRole === 'ADMIN' && (
               <>
@@ -545,7 +525,7 @@ function App() {
             {activeTab === 'options' && <OptionsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
             {activeTab === 'draft' && <DraftTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
             {activeTab === 'trade' && <TradeMachineTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-            {activeTab === 'fa' && <FreeAgencyTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'fa' && <FreeAgencyTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} user={currentUser} onRefreshUser={refreshUser} />}
             {activeTab === 'feed' && <FeedTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
             {activeTab === 'settings' && activeRole === 'ADMIN' && <SettingsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
             {activeTab === 'users' && activeRole === 'ADMIN' && <UsersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} onUpdate={fetchSettings} />}
