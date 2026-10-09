@@ -24,8 +24,8 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
   const fetchData = async () => {
     try {
       const [boardRes, propsRes] = await Promise.all([
-        fetch('http://localhost:3000/draft/board'),
-        fetch('http://localhost:3000/draft/prospects')
+        fetch('/api/draft/board'),
+        fetch('/api/draft/prospects')
       ]);
       const boardData = await boardRes.json();
       const propsData = await propsRes.json();
@@ -48,7 +48,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
     if (!newProspectName.trim()) return;
     try {
       setLoading(true);
-      await fetch('http://localhost:3000/admin/draft/prospects', {
+      await fetch('/api/admin/draft/prospects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ name: newProspectName.trim(), position: newProspectPos, overall_rating: newProspectOvr })
@@ -65,7 +65,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
     if (!confirm('Точно удалить игрока из пула?')) return;
     try {
       setLoading(true);
-      await fetch(`http://localhost:3000/admin/draft/prospects/${id}`, {
+      await fetch(`/api/admin/draft/prospects/${id}`, {
         method: 'DELETE',
         headers: { 'x-user-role': role }
       });
@@ -80,7 +80,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
     if (!selectedPick) return;
     try {
       setIsDrafting(true);
-      const res = await fetch('http://localhost:3000/draft/pick', {
+      const res = await fetch('/api/draft/pick', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
@@ -242,11 +242,11 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
                 </div>
 
                 <button 
-                  disabled={isDrafting}
+                  disabled={isDrafting || (role !== 'ADMIN' && (!myTeamId || myTeamId !== selectedPick?.team_id))}
                   onClick={() => handleDraftPlayer(p.id)}
                   className="w-full mt-2 py-2.5 bg-[#34c759] hover:bg-[#2eb050] text-white text-[13px] font-bold rounded-xl active:scale-[0.98] transition-all shadow-md shadow-[#34c759]/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                 >
-                  <span>Задрафтовать {p.name}</span>
+                  <span>{(!myTeamId && role !== 'ADMIN') ? 'Только для менеджеров команд' : `Задрафтовать ${p.name}`}</span>
                 </button>
               </div>
             ))}

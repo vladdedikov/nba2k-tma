@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Replace, UserPlus, Rss, Settings, ChevronDown } from 'lucide-react';
+import { Users, Replace, UserPlus, Rss, Settings, ChevronDown, UserCheck } from 'lucide-react';
 import RostersTab from './components/RostersTab';
 import SettingsTab from './components/SettingsTab';
 import TradeMachineTab from './components/TradeMachineTab';
@@ -7,6 +7,45 @@ import FeedTab from './components/FeedTab';
 import OptionsTab from './components/OptionsTab';
 import DraftTab from './components/DraftTab';
 import FreeAgencyTab from './components/FreeAgencyTab';
+import UsersTab from './components/UsersTab';
+
+interface CurrentUser {
+  id: number;
+  telegram_id: number;
+  username: string | null;
+  first_name: string | null;
+  role: 'ADMIN' | 'USER';
+  team_id: string | null;
+  team?: {
+    id: string;
+    name: string;
+    logo_url?: string;
+  } | null;
+}
+
+const TEST_USERS = [
+  {
+    key: 'admin',
+    label: '👑 Админ @smthing69else',
+    telegram_id: 777777777,
+    username: 'smthing69else',
+    first_name: 'Комиссионер'
+  },
+  {
+    key: 'celtics_gm',
+    label: '🏀 ГМ Celtics @nba_player_gm',
+    telegram_id: 123456789,
+    username: 'nba_player_gm',
+    first_name: 'Alex'
+  },
+  {
+    key: 'guest',
+    label: '👀 Зритель @guest_fan',
+    telegram_id: 999999999,
+    username: 'guest_fan',
+    first_name: 'Гость'
+  }
+];
 
 function App() {
   const [activeTab, setActiveTab] = useState('rosters');
@@ -14,6 +53,12 @@ function App() {
   const [settings, setSettings] = useState<any>(null);
   const [isStageMenuOpen, setIsStageMenuOpen] = useState(false);
   const [myTeamId, setMyTeamId] = useState<string>('');
+  const [allTeams, setAllTeams] = useState<any[]>([]);
+
+  // Telegram TMA & User State
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [isTelegramEnv, setIsTelegramEnv] = useState(false);
+  const [selectedTestUserKey, setSelectedTestUserKey] = useState<string>('admin');
 
   // Season Selection State
   const [isSeasonConfirmOpen, setIsSeasonConfirmOpen] = useState(false);
@@ -23,31 +68,100 @@ function App() {
 
   const AVAILABLE_SEASONS = ["2026-27", "2027-28", "2028-29", "2029-30", "2030-31", "2031-32"];
 
+  const syncTelegramUser = async (userPayload: { telegram_id: number; username?: string | null; first_name?: string | null }) => {
+    try {
+      const res = await fetch('/api/auth/telegram-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userPayload)
+      });
+      if (res.ok) {
+        const profile: CurrentUser = await res.json();
+        setCurrentUser(profile);
+        setActiveRole(profile.role === 'ADMIN' ? 'ADMIN' : 'PLAYER');
+        setMyTeamId(profile.team_id || '');
+      }
+    } catch (e) {
+      console.error('Telegram sync error:', e);
+    }
+  };
+
+  // TMA SDK Initialization
+  useEffect(() => {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      try {
+        tg.ready();
+        tg.expand();
+      } catch (err) {}
+    }
+
+    const tgUser = tg?.initDataUnsafe?.user;
+    if (tgUser && tgUser.id) {
+      setIsTelegramEnv(true);
+      syncTelegramUser({
+        telegram_id: tgUser.id,
+        username: tgUser.username,
+        first_name: tgUser.first_name
+      });
+    } else {
+      // In browser mode: initialize default commissioner
+      setIsTelegramEnv(false);
+      const defaultUser = TEST_USERS[0];
+      syncTelegramUser({
+        telegram_id: defaultUser.telegram_id,
+        username: defaultUser.username,
+        first_name: defaultUser.first_name
+      });
+    }
+  }, []);
+
   const fetchSettings = async () => {
     try {
-      const res = await fetch('http://localhost:3000/league/settings');
+      const res = await fetch('/api/league/settings');
       const data = await res.json();
       setSettings(data);
       
-      const teamsRes = await fetch('http://localhost:3000/teams');
+      const teamsRes = await fetch('/api/teams');
       const teamsData = await teamsRes.json();
       const safeTeams = Array.isArray(teamsData) ? teamsData : (teamsData.teams || []);
-      if (safeTeams.length > 0) setMyTeamId(safeTeams[0].id); // MOCK: assigning user to first team
-    } catch (e) {}
+      setAllTeams(safeTeams);
+
+      // Re-verify user's assigned team from teams list if user is loaded
+      if (currentUser?.id) {
+        const foundUserTeam = safeTeams.find((t: any) => t.gm?.id === currentUser.id);
+        if (foundUserTeam) {
+          setMyTeamId(foundUserTeam.id);
+        } else if (currentUser.team_id) {
+          setMyTeamId(currentUser.team_id);
+        }
+      }
+    } catch (e) {
+      console.error('Settings fetch error:', e);
+    }
   };
 
   useEffect(() => {
     fetchSettings();
-  }, [activeTab]);
+  }, [activeTab, currentUser?.id]);
 
-  const toggleRole = () => {
-    setActiveRole(prev => prev === 'PLAYER' ? 'ADMIN' : 'PLAYER');
+  const handleTestUserChange = async (key: string) => {
+    setSelectedTestUserKey(key);
+    const target = TEST_USERS.find(u => u.key === key);
+    if (target) {
+      await syncTelegramUser({
+        telegram_id: target.telegram_id,
+        username: target.username,
+        first_name: target.first_name
+      });
+      await fetchSettings();
+    }
   };
 
   const changeStage = async (stage: string) => {
     if (activeRole !== 'ADMIN') return;
     try {
-      await fetch('http://localhost:3000/admin/league/stage', {
+      await fetch('/api/admin/league/stage', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-user-role': activeRole },
         body: JSON.stringify({ stage })
@@ -55,7 +169,7 @@ function App() {
       setIsStageMenuOpen(false);
       fetchSettings();
     } catch (e) {
-      alert('Ошибка');
+      alert('Ошибка при изменении этапа');
     }
   };
 
@@ -63,7 +177,7 @@ function App() {
     if (!selectedTargetSeason || activeRole !== 'ADMIN') return;
     setIsSubmittingSeason(true);
     try {
-      const res = await fetch('http://localhost:3000/admin/league/season', {
+      const res = await fetch('/api/admin/league/season', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -96,7 +210,7 @@ function App() {
     if (activeRole !== 'ADMIN') return;
     if (!confirm('Вы уверены, что хотите завершить текущий сезон?')) return;
     try {
-      await fetch('http://localhost:3000/admin/season/advance', {
+      await fetch('/api/admin/season/advance', {
         method: 'POST',
         headers: { 'x-user-role': activeRole }
       });
@@ -134,6 +248,8 @@ function App() {
     return 'bg-[#181818] border-[#303030] text-[#3390ec]';
   };
 
+  const myTeam = allTeams.find(t => t.id === myTeamId);
+
   return (
     <div className="flex flex-col h-screen bg-[#181818] text-white overflow-hidden">
       {/* Toast Notification */}
@@ -145,25 +261,90 @@ function App() {
       )}
 
       {/* Header */}
-      <div className="pt-4 pb-3 px-4 bg-[#212121] flex flex-col shadow-md z-20 sticky top-0 border-b border-[#303030]">
-        <div className="flex justify-between items-center mb-2.5">
-          <div className="font-bold text-lg">NBA2K TMA</div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={toggleRole}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#303030] rounded-lg text-[13px] font-semibold hover:bg-[#3a3a3c] transition-colors"
-            >
-              {activeRole === 'PLAYER' ? '👤 Игрок' : '👑 Админ'}
-            </button>
-            {activeRole === 'ADMIN' && (
-              <button 
-                onClick={() => setActiveTab('settings')}
-                className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'text-[#3390ec] bg-[#3390ec]/10' : 'text-[#8e8e93] hover:text-white'}`}
-              >
-                <Settings width="20" height="20" style={{ minWidth: 20, minHeight: 20 }} />
-              </button>
+      <div className="pt-3 pb-3 px-4 bg-[#212121] flex flex-col shadow-md z-20 sticky top-0 border-b border-[#303030] gap-2.5">
+        {/* Top Header Row */}
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-2">
+            <span className="font-black text-lg tracking-tight">NBA2K TMA</span>
+            {isTelegramEnv && (
+              <span className="bg-[#3390ec]/20 text-[#3390ec] text-[10px] font-bold px-1.5 py-0.5 rounded">TG</span>
             )}
           </div>
+
+          <div className="flex items-center gap-2">
+            {/* Browser Test User Selector */}
+            {!isTelegramEnv && (
+              <select
+                value={selectedTestUserKey}
+                onChange={e => handleTestUserChange(e.target.value)}
+                className="bg-[#181818] border border-[#303030] rounded-lg px-2 py-1 text-[11px] font-bold text-white outline-none focus:border-[#3390ec]"
+                title="Тестовый пользователь для отладки без Telegram"
+              >
+                {TEST_USERS.map(u => (
+                  <option key={u.key} value={u.key}>{u.label}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Admin Quick Action Buttons */}
+            {activeRole === 'ADMIN' && (
+              <>
+                <button 
+                  onClick={() => setActiveTab('users')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[12px] font-bold transition-colors ${
+                    activeTab === 'users' ? 'text-[#3390ec] bg-[#3390ec]/15 border border-[#3390ec]/30' : 'text-[#8e8e93] bg-[#303030] hover:text-white'
+                  }`}
+                  title="Участники лиги"
+                >
+                  <UserCheck width="14" height="14" />
+                  <span>Участники</span>
+                </button>
+                <button 
+                  onClick={() => setActiveTab('settings')}
+                  className={`p-1.5 rounded-lg transition-colors ${activeTab === 'settings' ? 'text-[#3390ec] bg-[#3390ec]/15' : 'text-[#8e8e93] bg-[#303030] hover:text-white'}`}
+                  title="Настройки лиги"
+                >
+                  <Settings width="16" height="16" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* User Identity Banner */}
+        <div className="rounded-xl px-3 py-1.5 text-[12px] font-bold flex items-center justify-between border shadow-sm transition-all">
+          {activeRole === 'ADMIN' ? (
+            <div className="flex items-center justify-between w-full text-[#ff9f0a]">
+              <span className="flex items-center gap-1.5">
+                <span>👑</span>
+                <span>Комиссионер (@{currentUser?.username || 'smthing69else'})</span>
+              </span>
+              <span className="text-[10px] bg-[#ff9f0a]/20 px-2 py-0.5 rounded font-extrabold uppercase tracking-wide">
+                Администратор
+              </span>
+            </div>
+          ) : myTeamId ? (
+            <div className="flex items-center justify-between w-full text-[#34c759]">
+              <span className="flex items-center gap-1.5 truncate">
+                <span>🏀</span>
+                <span className="truncate">{myTeam?.name || currentUser?.team?.name || 'Моя команда'}</span>
+                <span className="text-[#8e8e93] font-medium">(ГМ @{currentUser?.username || 'user'})</span>
+              </span>
+              <span className="text-[10px] bg-[#34c759]/20 px-2 py-0.5 rounded font-extrabold uppercase shrink-0 ml-2">
+                ГМ клуба
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between w-full text-[#ff453a]">
+              <span className="flex items-center gap-1.5 truncate">
+                <span>👀</span>
+                <span className="truncate">Зритель (@{currentUser?.username || 'user'}) • Ожидание назначения команды</span>
+              </span>
+              <span className="text-[10px] bg-[#ff453a]/20 px-2 py-0.5 rounded font-extrabold uppercase shrink-0 ml-2">
+                Зритель
+              </span>
+            </div>
+          )}
         </div>
         
         {/* Sub-header row: Season Badge & Stage Badge */}
@@ -311,10 +492,11 @@ function App() {
         {activeTab === 'rosters' && <RostersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
         {activeTab === 'options' && <OptionsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
         {activeTab === 'draft' && <DraftTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'trade' && <TradeMachineTab key={`${settings?.current_season}-${settings?.current_stage}`} />}
+        {activeTab === 'trade' && <TradeMachineTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
         {activeTab === 'fa' && <FreeAgencyTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'feed' && <FeedTab key={`${settings?.current_season}-${settings?.current_stage}`} />}
+        {activeTab === 'feed' && <FeedTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
         {activeTab === 'settings' && activeRole === 'ADMIN' && <SettingsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
+        {activeTab === 'users' && activeRole === 'ADMIN' && <UsersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} onUpdate={fetchSettings} />}
       </div>
 
       {/* Bottom Nav */}

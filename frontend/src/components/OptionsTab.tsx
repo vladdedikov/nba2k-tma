@@ -8,7 +8,7 @@ export default function OptionsTab({ role }: { role: string }) {
 
   const fetchOptions = async () => {
     try {
-      const res = await fetch('http://localhost:3000/offseason/options');
+      const res = await fetch('/api/offseason/options');
       const data = await res.json();
       setPlayers(Array.isArray(data) ? data : []);
       setLoading(false);
@@ -24,7 +24,7 @@ export default function OptionsTab({ role }: { role: string }) {
   const handleResolve = async (id: string, decision: 'ACCEPT' | 'DECLINE') => {
     if (!confirm(`Вы уверены, что хотите ${decision === 'ACCEPT' ? 'принять' : 'отклонить'} опцию?`)) return;
     try {
-      await fetch(`http://localhost:3000/offseason/options/${id}/resolve`, {
+      await fetch(`/api/offseason/options/${id}/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ decision })

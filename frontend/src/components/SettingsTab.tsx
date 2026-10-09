@@ -5,7 +5,7 @@ export default function SettingsTab({ role }: { role: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:3000/league/settings')
+    fetch('/api/league/settings')
       .then(res => res.json())
       .then(data => {
         setSettings({
@@ -30,7 +30,7 @@ export default function SettingsTab({ role }: { role: string }) {
     e.preventDefault();
     if (role !== 'ADMIN') return;
     try {
-      await fetch('http://localhost:3000/admin/league/settings', {
+      await fetch('/api/admin/league/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({

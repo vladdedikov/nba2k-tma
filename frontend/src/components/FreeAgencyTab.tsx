@@ -29,9 +29,9 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const fetchBaseData = async () => {
     try {
       const [tmRes, stRes, blRes] = await Promise.all([
-        fetch('http://localhost:3000/teams'),
-        fetch('http://localhost:3000/league/settings'),
-        fetch('http://localhost:3000/free-agency/blocks', { headers: { 'x-user-role': role } })
+        fetch('/api/teams'),
+        fetch('/api/league/settings'),
+        fetch('/api/free-agency/blocks', { headers: { 'x-user-role': role } })
       ]);
       const tmData = await tmRes.json();
       const stData = await stRes.json();
@@ -53,7 +53,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const fetchBlockPlayers = async (id: number) => {
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:3000/free-agency/blocks/${id}`, { headers: { 'x-user-role': role } });
+      const res = await fetch(`/api/free-agency/blocks/${id}`, { headers: { 'x-user-role': role } });
       const data = await res.json();
       setPlayers(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -66,7 +66,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const fetchUnassigned = async () => {
     if (role !== 'ADMIN') return;
     try {
-      const res = await fetch(`http://localhost:3000/admin/free-agency/unassigned-players`, { headers: { 'x-user-role': role } });
+      const res = await fetch(`/api/admin/free-agency/unassigned-players`, { headers: { 'x-user-role': role } });
       const data = await res.json();
       setUnassignedPlayers(Array.isArray(data) ? data : []);
     } catch (e) {}
@@ -114,7 +114,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     if (isCreating) return;
     try {
       setIsCreating(true);
-      await fetch(`http://localhost:3000/admin/free-agency/blocks`, {
+      await fetch(`/api/admin/free-agency/blocks`, {
         method: 'POST',
         headers: { 'x-user-role': role }
       });
@@ -130,7 +130,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     if (!confirm('Точно удалить этот блок? Все игроки вернутся в общий пул.')) return;
     try {
       setLoading(true);
-      const res = await fetch(`http://localhost:3000/admin/free-agency/blocks/${id}`, {
+      const res = await fetch(`/api/admin/free-agency/blocks/${id}`, {
         method: 'DELETE',
         headers: { 'x-user-role': role }
       });
@@ -155,7 +155,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const handleAddPlayer = async (playerId: string) => {
     if (!activeBlockId) return;
     try {
-      await fetch(`http://localhost:3000/admin/free-agency/blocks/${activeBlockId}/add-player`, {
+      await fetch(`/api/admin/free-agency/blocks/${activeBlockId}/add-player`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ player_id: playerId })
@@ -170,7 +170,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const handleRemovePlayer = async (playerId: string) => {
     if (!activeBlockId) return;
     try {
-      await fetch(`http://localhost:3000/admin/free-agency/blocks/${activeBlockId}/remove-player`, {
+      await fetch(`/api/admin/free-agency/blocks/${activeBlockId}/remove-player`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ player_id: playerId })
@@ -184,7 +184,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
 
   const handleStartBlock = async (id: number) => {
     try {
-      await fetch(`http://localhost:3000/admin/free-agency/blocks/${id}/start`, {
+      await fetch(`/api/admin/free-agency/blocks/${id}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ days: startDays, minutes: startMinutes })
@@ -199,7 +199,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     if (!confirm('Подписать игроков по лидирующим офферам и закрыть блок?')) return;
     try {
       setLoading(true);
-      await fetch(`http://localhost:3000/admin/free-agency/blocks/${id}/finalize`, {
+      await fetch(`/api/admin/free-agency/blocks/${id}/finalize`, {
         method: 'POST',
         headers: { 'x-user-role': role }
       });
@@ -216,7 +216,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     if (!confirm(action === 'MATCH' ? 'Повторить ставку и подписать игрока?' : 'Отказаться от игрока?')) return;
     try {
       setLoading(true);
-      await fetch(`http://localhost:3000/free-agency/offers/${offerId}/match`, {
+      await fetch(`/api/free-agency/offers/${offerId}/match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ action })
@@ -304,7 +304,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:3000/free-agency/offer', {
+      const res = await fetch('/api/free-agency/offer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({

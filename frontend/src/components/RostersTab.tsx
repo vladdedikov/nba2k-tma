@@ -31,8 +31,8 @@ export default function RostersTab({ role }: { role: string }) {
   const fetchSettingsAndTeams = async () => {
     try {
       const [setRes, teamsRes] = await Promise.all([
-        fetch('http://localhost:3000/league/settings'),
-        fetch('http://localhost:3000/teams')
+        fetch('/api/league/settings'),
+        fetch('/api/teams')
       ]);
       const setJson = await setRes.json();
       const teamsJson = await teamsRes.json();
@@ -84,13 +84,13 @@ export default function RostersTab({ role }: { role: string }) {
 
     try {
       if (editingPlayer) {
-        await fetch(`http://localhost:3000/admin/players/${editingPlayer.id}`, {
+        await fetch(`/api/admin/players/${editingPlayer.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'x-user-role': role },
           body: JSON.stringify(payload)
         });
       } else {
-        await fetch('http://localhost:3000/admin/players', {
+        await fetch('/api/admin/players', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-role': role },
           body: JSON.stringify(payload)
@@ -107,7 +107,7 @@ export default function RostersTab({ role }: { role: string }) {
     if (role !== 'ADMIN') return;
     if (confirm('Вы уверены, что хотите удалить (отчислить) этого игрока?')) {
       try {
-        await fetch(`http://localhost:3000/admin/players/${id}`, { 
+        await fetch(`/api/admin/players/${id}`, { 
           method: 'DELETE',
           headers: { 'x-user-role': role }
         });
@@ -122,7 +122,7 @@ export default function RostersTab({ role }: { role: string }) {
     e.preventDefault();
     if (role !== 'ADMIN') return;
     try {
-      await fetch(`http://localhost:3000/admin/players/${editingPlayer.id}/transfer`, {
+      await fetch(`/api/admin/players/${editingPlayer.id}/transfer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': role },
         body: JSON.stringify({ target_team_id: transferTargetId })
@@ -163,7 +163,7 @@ export default function RostersTab({ role }: { role: string }) {
         name: String(pickFormData.name).trim()
       };
 
-      const res = await fetch('http://localhost:3000/admin/draft-picks', {
+      const res = await fetch('/api/admin/draft-picks', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json', 
@@ -226,7 +226,7 @@ export default function RostersTab({ role }: { role: string }) {
         };
       }));
 
-      const res = await fetch(`http://localhost:3000/admin/draft-picks/${pickId}`, {
+      const res = await fetch(`/api/admin/draft-picks/${pickId}`, {
         method: 'DELETE',
         headers: { 'x-user-role': role }
       });

@@ -8,13 +8,14 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(uuid())
-  telegram_id   String?       @unique
-  username      String?
-  role          String        @default("USER")
-  
-  owned_teams   Team[]
-  insider_posts InsiderPost[]
+  id           Int      @id @default(autoincrement())
+  telegram_id  BigInt   @unique
+  username     String?
+  first_name   String?
+  role         String   @default("USER") // 'ADMIN' | 'USER'
+  team_id      String?  @unique
+  team         Team?    @relation(fields: [team_id], references: [id])
+  created_at   DateTime @default(now())
 }
 
 model Team {
@@ -24,8 +25,7 @@ model Team {
   budget         Float    @default(0)
   salary_cap     Float    @default(140000000)
 
-  owner_id       String?
-  owner          User?    @relation(fields: [owner_id], references: [id])
+  gm             User?
 
   players        Player[]
   contract_offers ContractOffer[]
@@ -136,8 +136,7 @@ model TradeOffer {
 
 model InsiderPost {
   id         String   @id @default(uuid())
-  author_id  String?
-  author     User?    @relation(fields: [author_id], references: [id])
+  type       String   @default("INSIDER") // 'INSIDER' | 'TEAM_POST'
   team_id    String?
   team       Team?    @relation(fields: [team_id], references: [id])
   

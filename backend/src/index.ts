@@ -3,8 +3,14 @@ import cors from '@fastify/cors';
 import { PrismaClient } from '@prisma/client';
 import * as dotenv from 'dotenv';
 
-// Load env from root
+// Load env
+dotenv.config();
 dotenv.config({ path: '../.env' });
+
+// Support BigInt serialization in JSON
+(BigInt.prototype as any).toJSON = function () {
+  return Number(this);
+};
 
 const prisma = new PrismaClient();
 const fastify = Fastify({ logger: true });
@@ -17,17 +23,23 @@ fastify.get('/', async (request, reply) => {
   return { hello: 'NBA2K TMA API' };
 });
 
-fastify.get('/teams', async (request, reply) => {
+const getTeamsHandler = async (request: any, reply: any) => {
   const teams = await prisma.team.findMany({ 
     include: { 
       players: true, 
-      owner: true,
+      gm: true,
       draft_picks: true
-    } 
+    },
+    orderBy: { name: 'asc' }
   });
-  // Map snake_case from DB to camelCase if frontend expects it, or just return as is
-  return teams;
-});
+  return teams.map(t => ({
+    ...t,
+    owner: t.gm // backwards compatibility for old components
+  }));
+};
+
+fastify.get('/teams', getTeamsHandler);
+fastify.get('/api/teams', getTeamsHandler);
 
 // Role check middleware/helper
 const checkAdmin = (request: any, reply: any) => {
@@ -38,6 +50,144 @@ const checkAdmin = (request: any, reply: any) => {
   }
   return true;
 };
+
+// Team permission check helper: Admin or specific team GM
+const checkUserTeamPermission = (request: any, reply: any, targetTeamId: string) => {
+  const role = request.headers['x-user-role'];
+  if (role === 'ADMIN') return true;
+
+  const userTeamId = request.headers['x-user-team-id'] || request.body?.user_team_id || request.body?.my_team_id;
+  if (!userTeamId) {
+    reply.status(403).send({ error: 'Зрители без команды не могут совершать действия! Дождитесь назначения клуба комиссионером.' });
+    return false;
+  }
+  if (String(userTeamId) !== String(targetTeamId)) {
+    reply.status(403).send({ error: 'Вы не можете совершать действия за чужую команду!' });
+    return false;
+  }
+  return true;
+};
+
+// Telegram Sync / Auth
+const telegramSyncHandler = async (request: any, reply: any) => {
+  const { telegram_id, username, first_name } = request.body || {};
+  if (!telegram_id) {
+    return reply.status(400).send({ error: 'Параметр telegram_id обязателен' });
+  }
+
+  const cleanUsername = String(username || '').replace('@', '').toLowerCase();
+  const configuredAdmin = (process.env.ADMIN_USERNAME || 'smthing69else').replace('@', '').toLowerCase();
+  const isAdmin = cleanUsername === configuredAdmin;
+  const parsedTgId = BigInt(telegram_id);
+
+  let user = await prisma.user.findUnique({
+    where: { telegram_id: parsedTgId },
+    include: { team: true }
+  });
+
+  if (!user) {
+    user = await prisma.user.create({
+      data: {
+        telegram_id: parsedTgId,
+        username: cleanUsername || null,
+        first_name: first_name ? String(first_name) : null,
+        role: isAdmin ? 'ADMIN' : 'USER',
+      },
+      include: { team: true }
+    });
+  } else {
+    const updates: any = {};
+    if (isAdmin && user.role !== 'ADMIN') updates.role = 'ADMIN';
+    if (cleanUsername && user.username !== cleanUsername) updates.username = cleanUsername;
+    if (first_name && user.first_name !== first_name) updates.first_name = String(first_name);
+
+    if (Object.keys(updates).length > 0) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: updates,
+        include: { team: true }
+      });
+    }
+  }
+
+  return {
+    id: user.id,
+    telegram_id: Number(user.telegram_id),
+    username: user.username,
+    first_name: user.first_name,
+    role: user.role,
+    team_id: user.team_id,
+    team: user.team
+  };
+};
+
+fastify.post('/auth/telegram-sync', telegramSyncHandler);
+fastify.post('/api/auth/telegram-sync', telegramSyncHandler);
+
+// Admin Users Management
+const adminGetUsersHandler = async (request: any, reply: any) => {
+  if (!checkAdmin(request, reply)) return;
+
+  const users = await prisma.user.findMany({
+    include: { team: true },
+    orderBy: { id: 'asc' }
+  });
+
+  const teams = await prisma.team.findMany({
+    include: { gm: true },
+    orderBy: { name: 'asc' }
+  });
+
+  const serializedUsers = users.map(u => ({
+    ...u,
+    telegram_id: Number(u.telegram_id)
+  }));
+
+  return { users: serializedUsers, teams };
+};
+
+fastify.get('/admin/users', adminGetUsersHandler);
+fastify.get('/api/admin/users', adminGetUsersHandler);
+
+const adminAssignTeamHandler = async (request: any, reply: any) => {
+  if (!checkAdmin(request, reply)) return;
+
+  const { user_id, team_id } = request.body || {};
+  if (!user_id) {
+    return reply.status(400).send({ error: 'Параметр user_id обязателен' });
+  }
+
+  const parsedUserId = Number(user_id);
+
+  if (!team_id) {
+    // Unassign user from team
+    await prisma.user.update({
+      where: { id: parsedUserId },
+      data: { team_id: null }
+    });
+    return { success: true, message: 'Команда успешно откреплена' };
+  }
+
+  const targetTeamId = String(team_id);
+
+  // Unassign any user currently attached to this team to respect @unique constraint
+  await prisma.user.updateMany({
+    where: { team_id: targetTeamId },
+    data: { team_id: null }
+  });
+
+  // Assign user to this team
+  await prisma.user.update({
+    where: { id: parsedUserId },
+    data: { team_id: targetTeamId }
+  });
+
+  return { success: true, message: 'Команда успешно закреплена за пользователем' };
+};
+
+fastify.post('/admin/users/assign-team', adminAssignTeamHandler);
+fastify.post('/api/admin/users/assign-team', adminAssignTeamHandler);
+
 
 fastify.get('/league/settings', async (request, reply) => {
   let settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
@@ -158,16 +308,39 @@ const checkTradesAllowed = async (reply: any, playerIds: string[] = []) => {
   return true;
 };
 
-fastify.get('/trades', async (request, reply) => {
+const getTradesHandler = async (request: any, reply: any) => {
+  const role = request.headers['x-user-role'];
+  const userTeamId = request.headers['x-user-team-id'] || (request.query as any)?.team_id;
+
+  let whereClause: any = {};
+  if (role !== 'ADMIN') {
+    if (!userTeamId) {
+      // Spectator without a team sees no confidential trade offers
+      return [];
+    }
+    whereClause = {
+      OR: [
+        { sender_team_id: String(userTeamId) },
+        { receiver_team_id: String(userTeamId) }
+      ]
+    };
+  }
+
   const trades = await prisma.tradeOffer.findMany({
+    where: whereClause,
     orderBy: { created_at: 'desc' },
     include: { sender_team: true, receiver_team: true }
   });
   return trades;
-});
+};
 
-fastify.post('/trades/offer', async (request, reply) => {
+fastify.get('/trades', getTradesHandler);
+fastify.get('/api/trades', getTradesHandler);
+
+const createTradeOfferHandler = async (request: any, reply: any) => {
   const data = request.body as any;
+  if (!checkUserTeamPermission(request, reply, data.sender_team_id)) return;
+
   const playerIds = [...(data.sent_player_ids || []), ...(data.received_player_ids || [])];
   if (!(await checkTradesAllowed(reply, playerIds))) return;
   // TODO: we assume frontend did validation, but backend should too. For brevity, creating the offer.
@@ -184,9 +357,12 @@ fastify.post('/trades/offer', async (request, reply) => {
     }
   });
   return offer;
-});
+};
 
-fastify.post('/trades/:id/respond', async (request, reply) => {
+fastify.post('/trades/offer', createTradeOfferHandler);
+fastify.post('/api/trades/offer', createTradeOfferHandler);
+
+const respondTradeOfferHandler = async (request: any, reply: any) => {
   const { id } = request.params as any;
   const { action } = request.body as any; // 'ACCEPT' | 'REJECT'
   
@@ -196,6 +372,8 @@ fastify.post('/trades/:id/respond', async (request, reply) => {
   });
   if (!trade) return reply.status(404).send({ error: 'Trade not found' });
   if (trade.status !== 'PENDING') return reply.status(400).send({ error: 'Trade is not pending' });
+
+  if (!checkUserTeamPermission(request, reply, trade.receiver_team_id)) return;
 
   if (action === 'REJECT') {
     return await prisma.tradeOffer.update({ where: { id }, data: { status: 'REJECTED' } });
@@ -221,12 +399,57 @@ fastify.post('/trades/:id/respond', async (request, reply) => {
     ]);
     return { success: true, status: 'ACCEPTED' };
   }
-});
+};
+
+fastify.post('/trades/:id/respond', respondTradeOfferHandler);
+fastify.post('/api/trades/:id/respond', respondTradeOfferHandler);
 
 // Insider Feed API
-fastify.get('/feed', async (request, reply) => {
-  return await prisma.insiderPost.findMany({ orderBy: { created_at: 'desc' }, include: { team: true, author: true } });
-});
+const getFeedHandler = async (request: any, reply: any) => {
+  return await prisma.insiderPost.findMany({ orderBy: { created_at: 'desc' }, include: { team: true } });
+};
+fastify.get('/feed', getFeedHandler);
+fastify.get('/api/feed', getFeedHandler);
+
+const createTeamPostHandler = async (request: any, reply: any) => {
+  const { text, content, team_id } = request.body || {};
+  const role = request.headers['x-user-role'];
+  const userTeamId = request.headers['x-user-team-id'] || team_id;
+
+  const targetTeamId = userTeamId ? String(userTeamId) : null;
+
+  if (!targetTeamId) {
+    return reply.status(400).send({ error: 'У вас нет назначенной команды для публикации официального заявления' });
+  }
+
+  const cleanText = String(text || content || '').trim();
+  if (!cleanText) {
+    return reply.status(400).send({ error: 'Текст заявления не может быть пустым' });
+  }
+
+  if (role !== 'ADMIN' && String(request.headers['x-user-team-id']) !== targetTeamId) {
+    return reply.status(403).send({ error: 'Вы можете публиковать заявления только от своей команды' });
+  }
+
+  const team = await prisma.team.findUnique({ where: { id: targetTeamId } });
+  if (!team) {
+    return reply.status(404).send({ error: 'Команда не найдена' });
+  }
+
+  const newPost = await prisma.insiderPost.create({
+    data: {
+      type: 'TEAM_POST',
+      team_id: targetTeamId,
+      content: cleanText
+    },
+    include: { team: true }
+  });
+
+  return { success: true, post: newPost };
+};
+
+fastify.post('/insiders/team-post', createTeamPostHandler);
+fastify.post('/api/insiders/team-post', createTeamPostHandler);
 
 // Offseason & Stage API
 fastify.patch('/admin/league/stage', async (request, reply) => {
@@ -323,11 +546,6 @@ const changeSeasonHandler = async (request: any, reply: any) => {
         completed_fa_blocks: [],
         current_block_deadline: null,
         current_block_number: 1
-      }
-    }),
-    prisma.insiderPost.create({
-      data: {
-        content: `🚨 СТАРТ НОВОГО СЕЗОНА ${target_season}! Контракты игроков пересчитаны со сдвигом на 1 год, драфт-пики ${finishedDraftYear} года завершены, лига переведена на стадию Драфта.`
       }
     })
   ]);
@@ -438,7 +656,6 @@ fastify.post('/admin/season/advance-year', async (request, reply) => {
   await prisma.$transaction([
     ...updates,
     prisma.draftPick.updateMany({ data: { year: { decrement: 1 } } }),
-    prisma.insiderPost.create({ data: { content: '🚨 СТАРТ НОВОГО СЕЗОНА! Контракты сдвинуты на 1 год. Игроки с истекшими контрактами стали свободными агентами.' } }),
     prisma.leagueSettings.update({ where: { id: 1 }, data: { current_stage: 'REGULAR_SEASON' } })
   ]);
   
@@ -594,10 +811,8 @@ fastify.patch('/admin/draft/setup', async (request, reply) => {
   return { success: true };
 });
 
-fastify.post('/draft/pick', async (request, reply) => {
+const draftPickHandler = async (request: any, reply: any) => {
   const { pick_id, player_id } = (request.body as any) || {};
-  const role = request.headers['x-user-role'];
-  const userTeamId = request.headers['x-user-team-id'] || (request.body as any)?.user_team_id || (request.body as any)?.my_team_id;
 
   if (!pick_id || !player_id) {
     return reply.status(400).send({ error: 'Параметры pick_id и player_id обязательны' });
@@ -618,15 +833,7 @@ fastify.post('/draft/pick', async (request, reply) => {
     return reply.status(400).send({ error: 'Этот пик уже использован!' });
   }
 
-  // Permission Check:
-  // Если заголовок x-user-role === 'ADMIN': РАЗРЕШИТЬ выбор игрока для ЛЮБОЙ команды (принудительный выбор админом).
-  // Если обычный игрок (x-user-role !== 'ADMIN'):
-  // Проверить, совпадает ли user.team_id с team_id текущего пика. Если не совпадает — возвращать 403 Forbidden: { error: "Вы можете выбирать игроков только за свою команду!" }.
-  if (role !== 'ADMIN') {
-    if (!userTeamId || String(userTeamId) !== String(pick.team_id)) {
-      return reply.status(403).send({ error: "Вы можете выбирать игроков только за свою команду!" });
-    }
-  }
+  if (!checkUserTeamPermission(request, reply, pick.team_id)) return;
 
   // Назначение игрока
   await prisma.player.update({
@@ -697,7 +904,10 @@ fastify.post('/draft/pick', async (request, reply) => {
     settings: updatedSettings,
     current_pick_index: nextIndex
   };
-});
+};
+
+fastify.post('/draft/pick', draftPickHandler);
+fastify.post('/api/draft/pick', draftPickHandler);
 
 // Free Agency API
 fastify.get('/free-agency/players', async (request, reply) => {
@@ -922,8 +1132,10 @@ fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, repl
   return { success: true };
 });
 
-fastify.post('/free-agency/offer', async (request, reply) => {
+const createFaOfferHandler = async (request: any, reply: any) => {
   const { player_id, team_id, offer_type, salaries } = request.body as any;
+  if (!checkUserTeamPermission(request, reply, team_id)) return;
+
   const parsedSalaries = salaries ? salaries.map(Number) : [];
   const years = parsedSalaries.length;
   
@@ -961,7 +1173,10 @@ fastify.post('/free-agency/offer', async (request, reply) => {
     }
   });
   return { success: true, offer };
-});
+};
+
+fastify.post('/free-agency/offer', createFaOfferHandler);
+fastify.post('/api/free-agency/offer', createFaOfferHandler);
 
 fastify.post('/free-agency/offers/:offerId/match', async (request, reply) => {
   const { offerId } = request.params as any;
@@ -1063,7 +1278,7 @@ fastify.post('/admin/free-agency/finalize/:playerId', async (request, reply) => 
 
 const start = async () => {
   try {
-    await fastify.listen({ port: 3000 });
+    await fastify.listen({ port: 3000, host: '0.0.0.0' });
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
