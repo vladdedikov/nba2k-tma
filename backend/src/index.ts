@@ -239,6 +239,106 @@ fastify.patch('/admin/league/stage', async (request, reply) => {
   return { success: true };
 });
 
+const changeSeasonHandler = async (request: any, reply: any) => {
+  if (!checkAdmin(request, reply)) return;
+  const { target_season } = request.body || {};
+  if (!target_season) {
+    return reply.status(400).send({ error: 'Параметр target_season обязателен' });
+  }
+
+  const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
+  const currentSeasonStr = settings?.current_season || '2026-27';
+
+  // Определяем год завершившегося драфта из текущего сезона (например, "2026-27" -> 2027)
+  const getDraftYear = (seasonStr: string): number => {
+    const parts = seasonStr.split('-');
+    const startYear = parseInt(parts[0], 10);
+    return isNaN(startYear) ? new Date().getFullYear() : startYear + 1;
+  };
+  const finishedDraftYear = getDraftYear(currentSeasonStr);
+
+  console.log(`>>> [SEASON_CHANGE] Смена сезона: ${currentSeasonStr} -> ${target_season}, удаление пиков <= ${finishedDraftYear}`);
+
+  // 1. АВТОМАТИЧЕСКАЯ ОЧИСТКА ДРАФТ-ПИКОВ:
+  // Удалить из таблицы DraftPick все пики команд, год которых меньше или равен году завершившегося драфта
+  await prisma.draftPick.deleteMany({
+    where: { year: { lte: finishedDraftYear } }
+  });
+
+  // 2. СДВИГ КОНТРАКТОВ ИГРОКОВ:
+  const players = await prisma.player.findMany({ where: { team_id: { not: null } } });
+  const playerUpdates = players.map(p => {
+    let newSalaries = [...p.salaries];
+    let newLeft = p.contract_years_left - 1;
+    if (newSalaries.length > 0) {
+      newSalaries.shift();
+    }
+    const isExpired = newLeft <= 0 || newSalaries.length === 0;
+
+    if (isExpired) {
+      return prisma.player.update({
+        where: { id: p.id },
+        data: {
+          team_id: null,
+          previous_team_id: p.team_id,
+          is_rfa: false,
+          contract_years_left: 0,
+          salaries: [],
+          salary: 0,
+          option_type: 'NONE',
+          is_trade_restricted: false,
+          fa_block_id: null
+        }
+      });
+    } else {
+      return prisma.player.update({
+        where: { id: p.id },
+        data: {
+          contract_years_left: newLeft,
+          salaries: newSalaries,
+          salary: newSalaries[0] || 0,
+          is_trade_restricted: false,
+          fa_block_id: null
+        }
+      });
+    }
+  });
+
+  await prisma.$transaction([
+    ...playerUpdates,
+    prisma.player.updateMany({
+      where: { team_id: null },
+      data: { is_trade_restricted: false, fa_block_id: null }
+    }),
+    prisma.faBlock.deleteMany(),
+    prisma.leagueSettings.update({
+      where: { id: 1 },
+      data: {
+        current_season: target_season,
+        current_stage: 'DRAFT',
+        draft_order_approved: true,
+        current_draft_pick_index: 0,
+        draft_is_completed: false,
+        approved_fa_blocks: [],
+        completed_fa_blocks: [],
+        current_block_deadline: null,
+        current_block_number: 1
+      }
+    }),
+    prisma.insiderPost.create({
+      data: {
+        content: `🚨 СТАРТ НОВОГО СЕЗОНА ${target_season}! Контракты игроков пересчитаны со сдвигом на 1 год, драфт-пики ${finishedDraftYear} года завершены, лига переведена на стадию Драфта.`
+      }
+    })
+  ]);
+
+  console.log(`>>> [SEASON_CHANGE] Сезон успешно изменен на: ${target_season}`);
+  return reply.status(200).send({ success: true, newSeason: target_season });
+};
+
+fastify.post('/admin/league/season', changeSeasonHandler);
+fastify.post('/api/admin/league/season', changeSeasonHandler);
+
 fastify.post('/admin/season/advance', async (request, reply) => {
   if (!checkAdmin(request, reply)) return;
 
@@ -348,13 +448,40 @@ fastify.post('/admin/season/advance-year', async (request, reply) => {
 // Draft API
 fastify.get('/draft/board', async (request, reply) => {
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
-  const currentYear = new Date().getFullYear();
-  const picks = await prisma.draftPick.findMany({
-    where: { year: currentYear },
-    orderBy: { id: 'asc' },
-    include: { team: true }
+  
+  const allPicks = await prisma.draftPick.findMany({
+    orderBy: [{ year: 'asc' }, { id: 'asc' }],
+    include: {
+      team: true,
+      selected_player: {
+        select: { id: true, name: true, position: true, overall_rating: true }
+      }
+    }
   });
-  return { picks, settings };
+
+  const picks = allPicks.map((p, idx) => ({
+    ...p,
+    pick_number: idx + 1,
+    team: {
+      id: p.team.id,
+      name: p.team.name,
+      logo_url: p.team.logo_url
+    },
+    selected_player: p.selected_player ? {
+      id: p.selected_player.id,
+      name: p.selected_player.name,
+      position: p.selected_player.position,
+      overall_rating: p.selected_player.overall_rating
+    } : null
+  }));
+
+  const currentPickIndex = settings?.current_draft_pick_index ?? 0;
+
+  return { 
+    picks, 
+    settings,
+    current_pick_index: currentPickIndex
+  };
 });
 
 fastify.get('/draft/prospects', async (request, reply) => {
@@ -468,14 +595,40 @@ fastify.patch('/admin/draft/setup', async (request, reply) => {
 });
 
 fastify.post('/draft/pick', async (request, reply) => {
-  const { pick_id, player_id } = request.body as any;
-  
-  const pick = await prisma.draftPick.findUnique({ where: { id: parseInt(pick_id, 10) } });
+  const { pick_id, player_id } = (request.body as any) || {};
+  const role = request.headers['x-user-role'];
+  const userTeamId = request.headers['x-user-team-id'] || (request.body as any)?.user_team_id || (request.body as any)?.my_team_id;
+
+  if (!pick_id || !player_id) {
+    return reply.status(400).send({ error: 'Параметры pick_id и player_id обязательны' });
+  }
+
+  const pick = await prisma.draftPick.findUnique({ 
+    where: { id: parseInt(pick_id, 10) },
+    include: { team: true }
+  });
   const player = await prisma.player.findUnique({ where: { id: player_id } });
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
-  
-  if (!pick || !player || !settings) return reply.status(400).send({ error: 'Not found' });
-  
+
+  if (!pick || !player || !settings) {
+    return reply.status(404).send({ error: 'Пик, игрок или настройки лиги не найдены' });
+  }
+
+  if (pick.is_used) {
+    return reply.status(400).send({ error: 'Этот пик уже использован!' });
+  }
+
+  // Permission Check:
+  // Если заголовок x-user-role === 'ADMIN': РАЗРЕШИТЬ выбор игрока для ЛЮБОЙ команды (принудительный выбор админом).
+  // Если обычный игрок (x-user-role !== 'ADMIN'):
+  // Проверить, совпадает ли user.team_id с team_id текущего пика. Если не совпадает — возвращать 403 Forbidden: { error: "Вы можете выбирать игроков только за свою команду!" }.
+  if (role !== 'ADMIN') {
+    if (!userTeamId || String(userTeamId) !== String(pick.team_id)) {
+      return reply.status(403).send({ error: "Вы можете выбирать игроков только за свою команду!" });
+    }
+  }
+
+  // Назначение игрока
   await prisma.player.update({
     where: { id: player_id },
     data: {
@@ -488,22 +641,62 @@ fastify.post('/draft/pick', async (request, reply) => {
       option_type: 'TEAM_OPTION'
     }
   });
-  
+
+  // Отметка пика
   await prisma.draftPick.update({
     where: { id: pick.id },
-    data: { is_used: true }
+    data: { 
+      is_used: true,
+      selected_player_id: player_id
+    }
   });
-  
+
+  // Индекс current_draft_pick_index увеличивается на 1 (ход переходит дальше)
+  const allPicksCount = await prisma.draftPick.count();
   const nextIndex = settings.current_draft_pick_index + 1;
-  await prisma.leagueSettings.update({
+  const isCompleted = nextIndex >= allPicksCount;
+
+  const updatedSettings = await prisma.leagueSettings.update({
     where: { id: 1 },
     data: { 
       current_draft_pick_index: nextIndex,
-      draft_is_completed: nextIndex >= 4 
+      draft_is_completed: isCompleted
     }
   });
-  
-  return { success: true };
+
+  // Возвращать обновленное состояние доски
+  const allUpdatedPicks = await prisma.draftPick.findMany({
+    orderBy: [{ year: 'asc' }, { id: 'asc' }],
+    include: {
+      team: true,
+      selected_player: {
+        select: { id: true, name: true, position: true, overall_rating: true }
+      }
+    }
+  });
+
+  const picks = allUpdatedPicks.map((p, idx) => ({
+    ...p,
+    pick_number: idx + 1,
+    team: {
+      id: p.team.id,
+      name: p.team.name,
+      logo_url: p.team.logo_url
+    },
+    selected_player: p.selected_player ? {
+      id: p.selected_player.id,
+      name: p.selected_player.name,
+      position: p.selected_player.position,
+      overall_rating: p.selected_player.overall_rating
+    } : null
+  }));
+
+  return { 
+    success: true, 
+    picks, 
+    settings: updatedSettings,
+    current_pick_index: nextIndex
+  };
 });
 
 // Free Agency API

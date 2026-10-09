@@ -11,6 +11,7 @@ async function main() {
   await prisma.contractOffer.deleteMany();
   await prisma.tradeOffer.deleteMany();
   await prisma.draftPick.deleteMany();
+  await prisma.faBlock.deleteMany();
   await prisma.player.deleteMany();
   await prisma.team.deleteMany();
   await prisma.user.deleteMany();
@@ -25,6 +26,14 @@ async function main() {
       first_apron: 178000000,
       second_apron: 189000000,
       hard_cap: 200000000,
+      current_stage: 'DRAFT',
+      draft_order_approved: true,
+      current_draft_pick_index: 0,
+      draft_is_completed: false,
+      approved_fa_blocks: [],
+      completed_fa_blocks: [],
+      current_block_deadline: null,
+      current_block_number: 1,
       min_salary_schedule: [1.15, 1.25, 1.35, 1.45, 1.55],
       tax_mle_schedule: [5.3, 5.6, 5.9],
       full_mle_schedule: [12.9, 13.6, 14.3, 15.0],
@@ -131,13 +140,15 @@ async function main() {
   const currentYear = new Date().getFullYear();
   const picksData = [];
 
-  for (const team of teams) {
-    for (let year = currentYear; year <= currentYear + 1; year++) {
-      for (let round = 1; round <= 2; round++) {
+  for (let year = currentYear; year <= currentYear + 1; year++) {
+    for (let round = 1; round <= 2; round++) {
+      for (const team of teams) {
         picksData.push({
           name: `${round}-й раунд`,
           year,
           team_id: team.id,
+          is_used: false,
+          selected_player_id: null
         });
       }
     }

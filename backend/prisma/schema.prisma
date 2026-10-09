@@ -61,6 +61,7 @@ model Player {
 
   free_agency_lots    FreeAgencyLot[]
   contract_offers     ContractOffer[]
+  drafted_in_picks    DraftPick[]
 }
 
 model ContractOffer {
@@ -84,6 +85,7 @@ model LeagueSettings {
   second_apron           Float   @default(189.0)
   hard_cap               Float   @default(200.0)
   current_stage          String  @default("REGULAR_SEASON")
+  current_season         String  @default("2026-27")
   
   draft_order_approved   Boolean @default(false)
   current_draft_pick_index Int   @default(0)
@@ -104,13 +106,15 @@ model LeagueSettings {
 }
 
 model DraftPick {
-  id         Int      @id @default(autoincrement())
-  year       Int
-  name       String
-  team_id    String
-  team       Team     @relation(fields: [team_id], references: [id], onDelete: Cascade)
-  is_used    Boolean  @default(false)
-  created_at DateTime @default(now())
+  id                 Int      @id @default(autoincrement())
+  year               Int
+  name               String
+  team_id            String
+  team               Team     @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  is_used            Boolean  @default(false)
+  selected_player_id String?
+  selected_player    Player?  @relation(fields: [selected_player_id], references: [id])
+  created_at         DateTime @default(now())
 }
 
 model TradeOffer {
