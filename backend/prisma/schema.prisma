@@ -65,16 +65,18 @@ model Player {
 }
 
 model ContractOffer {
-  id            String   @id @default(uuid())
-  player_id     String
-  player        Player   @relation(fields: [player_id], references: [id])
-  team_id       String
-  team          Team     @relation(fields: [team_id], references: [id])
-  years         Int      @default(1)
-  annual_salary Float
-  salaries      Float[]
-  status        String   @default("PENDING")
-  created_at    DateTime @default(now())
+  id                String   @id @default(uuid())
+  player_id         String
+  player            Player   @relation(fields: [player_id], references: [id])
+  team_id           String
+  team              Team     @relation(fields: [team_id], references: [id])
+  years             Int      @default(1)
+  annual_salary     Float
+  salaries          Float[]
+  last_year_option  String   @default("NONE") // 'NONE' | 'PLAYER_OPTION' | 'TEAM_OPTION'
+  evaluation_amount Float    @default(0) // Сумма первых 4 лет для ранжирования
+  status            String   @default("PENDING")
+  created_at        DateTime @default(now())
 }
 
 model LeagueSettings {

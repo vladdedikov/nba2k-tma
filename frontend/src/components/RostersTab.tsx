@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Pencil, Trash2, Plus, X, ArrowRightLeft } from 'lucide-react';
 
-export default function RostersTab({ role }: { role: string }) {
+export default function RostersTab({ role, myTeamId }: { role: string; myTeamId?: string | null }) {
   const [teams, setTeams] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
-  const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+  const [selectedTeamId, setSelectedTeamId] = useState<string>(myTeamId || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +42,11 @@ export default function RostersTab({ role }: { role: string }) {
       setSettings(setJson);
       setTeams(safeTeams);
       if (safeTeams && safeTeams.length > 0 && !selectedTeamId) {
-        setSelectedTeamId(safeTeams[0].id);
+        if (myTeamId && safeTeams.some((t: any) => t.id === myTeamId)) {
+          setSelectedTeamId(myTeamId);
+        } else {
+          setSelectedTeamId(safeTeams[0].id);
+        }
       }
       setLoading(false);
     } catch (err) {
@@ -51,6 +55,12 @@ export default function RostersTab({ role }: { role: string }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (myTeamId && teams.length > 0 && teams.some((t: any) => t.id === myTeamId) && (!selectedTeamId || selectedTeamId !== myTeamId)) {
+      setSelectedTeamId(myTeamId);
+    }
+  }, [myTeamId, teams]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).Telegram?.WebApp) {

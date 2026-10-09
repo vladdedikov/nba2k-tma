@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Replace, UserPlus, Rss, Settings, ChevronDown, UserCheck } from 'lucide-react';
+import { Users, Replace, UserPlus, Rss, Settings, ChevronDown, UserCheck, RefreshCw } from 'lucide-react';
 import RostersTab from './components/RostersTab';
 import SettingsTab from './components/SettingsTab';
 import TradeMachineTab from './components/TradeMachineTab';
@@ -249,6 +249,7 @@ function App() {
   };
 
   const myTeam = allTeams.find(t => t.id === myTeamId);
+  const isGuestWaiting = Boolean(currentUser && activeRole !== 'ADMIN' && !myTeamId);
 
   return (
     <div className="flex flex-col h-screen bg-[#181818] text-white overflow-hidden">
@@ -348,64 +349,81 @@ function App() {
         </div>
         
         {/* Sub-header row: Season Badge & Stage Badge */}
-        <div className="grid grid-cols-2 gap-2">
-          {/* Season Selector / Badge */}
-          <div className="relative">
-            {activeRole === 'ADMIN' ? (
-              <div className="relative">
-                <select
-                  value={currentSeason}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val !== currentSeason) {
-                      setSelectedTargetSeason(val);
-                      setIsSeasonConfirmOpen(true);
-                    }
-                  }}
-                  className="w-full bg-[#181818] border border-[#303030] rounded-xl p-2.5 text-white font-bold text-[12px] appearance-none pr-7 cursor-pointer hover:border-[#3390ec] transition-colors outline-none"
-                >
-                  {AVAILABLE_SEASONS.map(s => (
-                    <option key={s} value={s}>🏆 Сезон: {s}</option>
-                  ))}
-                </select>
-                <ChevronDown width="14" height="14" className="absolute right-2.5 top-3.5 text-[#8e8e93] pointer-events-none" />
-              </div>
-            ) : (
-              <div className="bg-[#181818] border border-[#303030] rounded-xl p-2.5 text-white font-bold text-[12px] text-center truncate">
-                🏆 Сезон: {currentSeason}
-              </div>
-            )}
-          </div>
-
-          {/* Stage Badge / Dropdown */}
-          <div className="relative">
-            <button 
-              onClick={() => activeRole === 'ADMIN' && setIsStageMenuOpen(!isStageMenuOpen)}
-              className={`flex items-center justify-between w-full p-2.5 rounded-xl border ${getStageBadgeStyle(settings?.current_stage)} font-bold text-[12px] transition-colors truncate`}
-            >
-              <span className="truncate">Этап: {currentStageName}</span>
-              {activeRole === 'ADMIN' && <ChevronDown width="14" height="14" className="opacity-70 shrink-0 ml-1" />}
-            </button>
-            
-            {isStageMenuOpen && activeRole === 'ADMIN' && (
-              <div className="absolute top-full right-0 w-[180px] mt-1 bg-[#212121] border border-[#303030] rounded-xl shadow-xl flex flex-col p-1 z-50">
-                {Object.entries(STAGES).map(([key, label]) => (
-                  <button 
-                    key={key} 
-                    onClick={() => changeStage(key)}
-                    className={`text-left p-2.5 text-[12px] font-bold rounded-lg transition-colors ${settings?.current_stage === key ? 'bg-[#3390ec]/10 text-[#3390ec]' : 'text-white hover:bg-[#303030]'}`}
+        {!isGuestWaiting && (
+          <div className="grid grid-cols-2 gap-2">
+            {/* Season Selector / Badge */}
+            <div className="relative">
+              {activeRole === 'ADMIN' ? (
+                <div className="relative">
+                  <select
+                    value={currentSeason}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val !== currentSeason) {
+                        setSelectedTargetSeason(val);
+                        setIsSeasonConfirmOpen(true);
+                      }
+                    }}
+                    className="w-full bg-[#181818] border border-[#303030] rounded-xl p-2.5 text-white font-bold text-[12px] appearance-none pr-7 cursor-pointer hover:border-[#3390ec] transition-colors outline-none"
                   >
-                    {label}
-                  </button>
-                ))}
-                <div className="h-px bg-[#303030] my-1"></div>
-                <button onClick={finishSeason} className="text-left p-2.5 text-[12px] font-bold rounded-lg text-[#ff3b30] hover:bg-[#ff3b30]/10 transition-colors">
-                  🏁 Завершить сезон
-                </button>
-              </div>
-            )}
+                    {AVAILABLE_SEASONS.map(s => (
+                      <option key={s} value={s}>🏆 Сезон: {s}</option>
+                    ))}
+                  </select>
+                  <ChevronDown width="14" height="14" className="absolute right-2.5 top-3.5 text-[#8e8e93] pointer-events-none" />
+                </div>
+              ) : (
+                <div className="bg-[#181818] border border-[#303030] rounded-xl p-2.5 text-white font-bold text-[12px] text-center truncate">
+                  🏆 Сезон: {currentSeason}
+                </div>
+              )}
+            </div>
+
+            {/* Stage Badge / Dropdown */}
+            <div className="relative">
+              <button 
+                onClick={() => activeRole === 'ADMIN' && setIsStageMenuOpen(!isStageMenuOpen)}
+                className={`flex items-center justify-between w-full p-2.5 rounded-xl border ${getStageBadgeStyle(settings?.current_stage)} font-bold text-[12px] transition-colors truncate`}
+              >
+                <span className="truncate">Этап: {currentStageName}</span>
+                {activeRole === 'ADMIN' && <ChevronDown width="14" height="14" className="opacity-70 shrink-0 ml-1" />}
+              </button>
+              
+              {isStageMenuOpen && activeRole === 'ADMIN' && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setIsStageMenuOpen(false)} 
+                  />
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-[#1a1a1a] border border-[#333] rounded-xl shadow-2xl z-50 py-1 flex flex-col">
+                    {Object.entries(STAGES).map(([key, label]) => (
+                      <button 
+                        key={key} 
+                        onClick={() => {
+                          changeStage(key);
+                          setIsStageMenuOpen(false);
+                        }} 
+                        className={`text-left px-3 py-2 text-[12px] font-bold rounded-lg transition-colors ${settings?.current_stage === key ? 'bg-[#3390ec]/15 text-[#3390ec]' : 'text-white hover:bg-[#2c2c2e]'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <div className="h-px bg-[#333] my-1"></div>
+                    <button 
+                      onClick={() => {
+                        finishSeason();
+                        setIsStageMenuOpen(false);
+                      }} 
+                      className="text-left px-3 py-2 text-[12px] font-bold rounded-lg text-[#ff3b30] hover:bg-[#ff3b30]/10 transition-colors"
+                    >
+                      🏁 Завершить сезон
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Season Confirmation Modal */}
@@ -466,46 +484,82 @@ function App() {
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto pb-[76px]">
-        {settings?.current_stage === 'OFFSEASON_OPTIONS' && activeTab === 'rosters' ? (
-          <div className="p-4 bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/20 flex justify-between items-center">
-            <div className="text-[12px] font-bold text-[#ff9f0a]">Время решать опции контрактов!</div>
-            <button onClick={() => setActiveTab('options')} className="bg-[#ff9f0a] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">Перейти</button>
+      {/* Guest Waiting Gatekeeper Screen */}
+      {isGuestWaiting ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-sm mx-auto space-y-4 my-auto">
+          <div className="w-20 h-20 rounded-3xl bg-[#ff9f0a]/15 border border-[#ff9f0a]/30 text-[#ff9f0a] flex items-center justify-center text-4xl shadow-xl shadow-[#ff9f0a]/10">
+            ⏳
           </div>
-        ) : null}
-
-        {settings?.current_stage === 'DRAFT' && activeTab === 'rosters' ? (
-          <div className="p-4 bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/20 flex justify-between items-center">
-            <div className="text-[12px] font-bold text-[#ff9f0a]">Драфт новичков активен!</div>
-            <button onClick={() => setActiveTab('draft')} className="bg-[#ff9f0a] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">В Draft Room</button>
+          <h2 className="text-[20px] font-black text-white">
+            Ожидание назначения команды
+          </h2>
+          <div className="text-[14px] text-[#3390ec] font-bold">
+            Добро пожаловать, @{currentUser?.username || currentUser?.first_name || 'гость'}!
           </div>
-        ) : null}
+          <p className="text-[13px] text-[#8e8e93] leading-relaxed">
+            Ожидайте, пока администратор лиги прикрепит за вами команду. После этого вам откроются все функции управления клубом.
+          </p>
+          <button 
+            onClick={() => {
+              if (currentUser) {
+                syncTelegramUser({
+                  telegram_id: currentUser.telegram_id,
+                  username: currentUser.username,
+                  first_name: currentUser.first_name
+                });
+                fetchSettings();
+              }
+            }}
+            className="mt-2 px-5 py-2.5 bg-[#212121] hover:bg-[#2b2b2b] border border-[#303030] rounded-xl text-[12px] font-bold text-white transition-all active:scale-95 shadow-md flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4 text-[#3390ec]" />
+            <span>Проверить статус назначения</span>
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto pb-[76px]">
+            {settings?.current_stage === 'OFFSEASON_OPTIONS' && activeTab === 'rosters' ? (
+              <div className="p-4 bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/20 flex justify-between items-center">
+                <div className="text-[12px] font-bold text-[#ff9f0a]">Время решать опции контрактов!</div>
+                <button onClick={() => setActiveTab('options')} className="bg-[#ff9f0a] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">Перейти</button>
+              </div>
+            ) : null}
 
-        {settings?.current_stage === 'FREE_AGENCY' && activeTab === 'rosters' ? (
-          <div className="p-4 bg-[#34c759]/10 border-b border-[#34c759]/20 flex justify-between items-center">
-            <div className="text-[12px] font-bold text-[#34c759]">Рынок СА открыт!</div>
-            <button onClick={() => setActiveTab('fa')} className="bg-[#34c759] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">Перейти</button>
+            {settings?.current_stage === 'DRAFT' && activeTab === 'rosters' ? (
+              <div className="p-4 bg-[#ff9f0a]/10 border-b border-[#ff9f0a]/20 flex justify-between items-center">
+                <div className="text-[12px] font-bold text-[#ff9f0a]">Драфт новичков активен!</div>
+                <button onClick={() => setActiveTab('draft')} className="bg-[#ff9f0a] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">В Draft Room</button>
+              </div>
+            ) : null}
+
+            {settings?.current_stage === 'FREE_AGENCY' && activeTab === 'rosters' ? (
+              <div className="p-4 bg-[#34c759]/10 border-b border-[#34c759]/20 flex justify-between items-center">
+                <div className="text-[12px] font-bold text-[#34c759]">Рынок СА открыт!</div>
+                <button onClick={() => setActiveTab('fa')} className="bg-[#34c759] text-black px-3 py-1.5 rounded-lg text-[12px] font-bold active:scale-95 transition-transform">Перейти</button>
+              </div>
+            ) : null}
+
+            {activeTab === 'rosters' && <RostersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'options' && <OptionsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
+            {activeTab === 'draft' && <DraftTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'trade' && <TradeMachineTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'fa' && <FreeAgencyTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'feed' && <FeedTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
+            {activeTab === 'settings' && activeRole === 'ADMIN' && <SettingsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
+            {activeTab === 'users' && activeRole === 'ADMIN' && <UsersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} onUpdate={fetchSettings} />}
           </div>
-        ) : null}
 
-        {activeTab === 'rosters' && <RostersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
-        {activeTab === 'options' && <OptionsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
-        {activeTab === 'draft' && <DraftTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'trade' && <TradeMachineTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'fa' && <FreeAgencyTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'feed' && <FeedTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} myTeamId={myTeamId} />}
-        {activeTab === 'settings' && activeRole === 'ADMIN' && <SettingsTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} />}
-        {activeTab === 'users' && activeRole === 'ADMIN' && <UsersTab key={`${settings?.current_season}-${settings?.current_stage}`} role={activeRole} onUpdate={fetchSettings} />}
-      </div>
-
-      {/* Bottom Nav */}
-      <div className="fixed bottom-0 w-full bg-[#212121] flex justify-around pb-6 pt-2 z-10 border-t border-[#303030]">
-        <NavButton id="rosters" icon={<Users width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Составы" active={activeTab === 'rosters' || activeTab === 'options' || activeTab === 'draft'} onClick={() => setActiveTab('rosters')} />
-        <NavButton id="trade" icon={<Replace width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Обмены" active={activeTab === 'trade'} onClick={() => setActiveTab('trade')} />
-        <NavButton id="fa" icon={<UserPlus width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Свободные" active={activeTab === 'fa'} onClick={() => setActiveTab('fa')} />
-        <NavButton id="feed" icon={<Rss width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Инсайды" active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} />
-      </div>
+          {/* Bottom Nav */}
+          <div className="fixed bottom-0 w-full bg-[#212121] flex justify-around pb-6 pt-2 z-10 border-t border-[#303030]">
+            <NavButton id="rosters" icon={<Users width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Составы" active={activeTab === 'rosters' || activeTab === 'options' || activeTab === 'draft'} onClick={() => setActiveTab('rosters')} />
+            <NavButton id="trade" icon={<Replace width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Обмены" active={activeTab === 'trade'} onClick={() => setActiveTab('trade')} />
+            <NavButton id="fa" icon={<UserPlus width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Свободные" active={activeTab === 'fa'} onClick={() => setActiveTab('fa')} />
+            <NavButton id="feed" icon={<Rss width="24" height="24" style={{ minWidth: 24, minHeight: 24 }} />} label="Инсайды" active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

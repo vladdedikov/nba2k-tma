@@ -215,17 +215,17 @@ export default function TradeMachineTab({ role = 'PLAYER', myTeamId: propMyTeamI
     : offers;
 
   return (
-    <div className="flex flex-col h-full bg-[#181818] overflow-y-auto pb-44 relative">
+    <div className="flex flex-col min-h-full overflow-y-auto p-4 pb-28 space-y-4 bg-[#181818]">
       
       {/* Banners */}
       {isTradeDeadline && (
-        <div className="bg-[#ff3b30]/10 border-b border-[#ff3b30]/20 p-2.5 text-center text-[#ff3b30] text-[12px] font-bold">
+        <div className="bg-[#ff3b30]/10 border border-[#ff3b30]/20 rounded-xl p-2.5 text-center text-[#ff3b30] text-[12px] font-bold">
           🚨 Дедлайн наступил! Обмены игроков и пиков заморожены до межсезонья.
         </div>
       )}
 
       {/* Main Tabs */}
-      <div className="flex p-2 bg-[#212121] border-b border-[#303030] gap-2 sticky top-0 z-20 shadow-md">
+      <div className="flex p-1.5 bg-[#212121] rounded-2xl border border-[#303030] gap-2">
         <button 
           onClick={() => setSubTab('BUILDER')} 
           className={`flex-1 py-2 text-center text-[13px] font-bold rounded-xl transition-all ${subTab === 'BUILDER' ? 'bg-[#3390ec] text-white shadow-md shadow-[#3390ec]/20' : 'text-[#8e8e93] hover:text-white'}`}
@@ -245,149 +245,185 @@ export default function TradeMachineTab({ role = 'PLAYER', myTeamId: propMyTeamI
         </button>
       </div>
 
-      <div className="p-4 flex-1">
-        {subTab === 'BUILDER' && (
-          <div className="space-y-4">
+      {subTab === 'BUILDER' && (
+        <div className="flex flex-col space-y-4">
+          
+          {/* 1) Выбор команд и карточки активов (Lakers vs Hawks) */}
+          <div className="grid grid-cols-2 gap-3">
             
-            {/* Two Teams Side-by-Side Builder */}
-            <div className="grid grid-cols-2 gap-3">
-              
-              {/* My Team */}
-              <div className="flex flex-col gap-2">
-                <div className="bg-[#212121] p-2 rounded-xl">
-                  {role === 'ADMIN' ? (
-                    <select 
-                      value={myTeamId} 
-                      onChange={e => setMyTeamId(e.target.value)} 
-                      className="w-full bg-[#181818] border border-[#303030] p-2 rounded-lg text-white font-bold text-[12px] outline-none"
-                    >
-                      {safeTeamsArray.map((t: any) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="p-2 text-white font-bold text-[12px] truncate">
-                      {myTeam?.name || 'Моя команда'}
-                    </div>
-                  )}
-                  <div className="text-[10px] text-[#8e8e93] mt-1 text-center font-semibold">
-                    Платежка: {formatMoney(myCurrentCap)}
-                  </div>
-                </div>
-
-                <div className="h-[250px] overflow-y-auto space-y-1 pr-1 bg-[#181818] p-1.5 rounded-xl border border-[#303030]">
-                  {(myTeam?.players || []).map((p: any) => {
-                    const restricted = p.is_trade_restricted;
-                    return (
-                      <div 
-                        key={p.id} 
-                        onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedMyPlayers, p.id, setSelectedMyPlayers)} 
-                        className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
-                      >
-                        <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
-                        <div className="text-[#8e8e93] text-[11px]">{formatMoney(p.salary)}</div>
-                      </div>
-                    );
-                  })}
-                  {(myTeam?.draft_picks || myTeam?.picks || []).map((p: any) => (
-                    <div 
-                      key={p.id} 
-                      onClick={() => !isTradeDeadline && toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} 
-                      className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
-                    >
-                      <div className="font-bold">🎟 {p.year}: {p.name}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="bg-[#212121] p-2.5 rounded-xl text-center text-[12px] shadow-sm border border-[#303030]">
-                  <div className="text-[#8e8e93] text-[11px]">Уходит</div>
-                  <div className="font-bold text-[#ff3b30]">{formatMoney(myOutgoingSalary)}</div>
-                  <div className="text-[#8e8e93] text-[11px] mt-1">Приходит</div>
-                  <div className="font-bold text-[#34c759]">{formatMoney(myIncomingSalary)}</div>
-                  <div className="mt-2 flex justify-center">
-                    {myValidation.valid ? <CheckCircle2 width="20" height="20" className="text-[#34c759]"/> : <div className="text-[10px] text-[#ff3b30] leading-tight font-semibold">{myValidation.err}</div>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Partner Team */}
-              <div className="flex flex-col gap-2">
-                <div className="bg-[#212121] p-2 rounded-xl border border-[#303030]">
+            {/* My Team */}
+            <div className="flex flex-col gap-2">
+              <div className="bg-[#212121] p-2 rounded-xl border border-[#303030]">
+                {role === 'ADMIN' ? (
                   <select 
-                    value={partnerTeamId} 
-                    onChange={e => setPartnerTeamId(e.target.value)} 
+                    value={myTeamId} 
+                    onChange={e => setMyTeamId(e.target.value)} 
                     className="w-full bg-[#181818] border border-[#303030] p-2 rounded-lg text-white font-bold text-[12px] outline-none"
                   >
-                    {safeTeamsArray.filter((t: any) => t.id !== effectiveMyTeamId).map((t: any) => (
+                    {safeTeamsArray.map((t: any) => (
                       <option key={t.id} value={t.id}>{t.name}</option>
                     ))}
                   </select>
-                  <div className="text-[10px] text-[#8e8e93] mt-1 text-center font-semibold">
-                    Платежка: {formatMoney(partnerCurrentCap)}
+                ) : (
+                  <div className="p-2 text-white font-bold text-[12px] truncate">
+                    {myTeam?.name || 'Моя команда'}
                   </div>
+                )}
+                <div className="text-[10px] text-[#8e8e93] mt-1 text-center font-semibold">
+                  Платежка: {formatMoney(myCurrentCap)}
                 </div>
+              </div>
 
-                <div className="h-[250px] overflow-y-auto space-y-1 pr-1 bg-[#181818] p-1.5 rounded-xl border border-[#303030]">
-                  {(partnerTeam?.players || []).map((p: any) => {
-                    const restricted = p.is_trade_restricted;
-                    return (
-                      <div 
-                        key={p.id} 
-                        onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedPartnerPlayers, p.id, setSelectedPartnerPlayers)} 
-                        className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
-                      >
-                        <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
-                        <div className="text-[#8e8e93] text-[11px]">{formatMoney(p.salary)}</div>
-                      </div>
-                    );
-                  })}
-                  {(partnerTeam?.draft_picks || partnerTeam?.picks || []).map((p: any) => (
+              <div className="h-[240px] overflow-y-auto space-y-1 pr-1 bg-[#181818] p-1.5 rounded-xl border border-[#303030]">
+                {(myTeam?.players || []).map((p: any) => {
+                  const restricted = p.is_trade_restricted;
+                  return (
                     <div 
                       key={p.id} 
-                      onClick={() => !isTradeDeadline && toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} 
-                      className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
+                      onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedMyPlayers, p.id, setSelectedMyPlayers)} 
+                      className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
                     >
-                      <div className="font-bold">🎟 {p.year}: {p.name}</div>
+                      <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
+                      <div className="text-[#8e8e93] text-[11px]">{formatMoney(p.salary)}</div>
                     </div>
-                  ))}
-                </div>
-
-                <div className="bg-[#212121] p-2.5 rounded-xl text-center text-[12px] shadow-sm border border-[#303030]">
-                  <div className="text-[#8e8e93] text-[11px]">Уходит</div>
-                  <div className="font-bold text-[#ff3b30]">{formatMoney(partnerOutgoingSalary)}</div>
-                  <div className="text-[#8e8e93] text-[11px] mt-1">Приходит</div>
-                  <div className="font-bold text-[#34c759]">{formatMoney(partnerIncomingSalary)}</div>
-                  <div className="mt-2 flex justify-center">
-                    {partnerValidation.valid ? <CheckCircle2 width="20" height="20" className="text-[#34c759]"/> : <div className="text-[10px] text-[#ff3b30] leading-tight font-semibold">{partnerValidation.err}</div>}
+                  );
+                })}
+                {(myTeam?.draft_picks || myTeam?.picks || []).map((p: any) => (
+                  <div 
+                    key={p.id} 
+                    onClick={() => !isTradeDeadline && toggleSet(selectedMyPicks, p.id, setSelectedMyPicks)} 
+                    className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedMyPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
+                  >
+                    <div className="font-bold">🎟 {p.year}: {p.name}</div>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Sticky Mobile-Friendly Bottom Bar for TMA */}
-            <div className="sticky bottom-0 bg-[#212121]/95 backdrop-blur-md p-4 -mx-4 -mb-4 border-t border-[#303030] shadow-2xl z-30 space-y-2.5 mt-4">
-              <textarea 
-                value={message} 
-                onChange={e => setMessage(e.target.value)}
-                placeholder="Комментарий к офферу (опционально)..."
-                disabled={isTradeDeadline}
-                className="w-full p-2.5 bg-[#181818] border border-[#303030] rounded-xl text-[12px] text-white outline-none focus:border-[#3390ec] resize-none h-[60px] disabled:opacity-50"
-              />
-              <button 
-                onClick={handleSendOffer}
-                disabled={!isValid || isTradeDeadline || (role !== 'ADMIN' && !propMyTeamId) || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)}
-                className={`w-full py-3.5 rounded-xl font-black text-[13px] transition-all flex items-center justify-center gap-2 shadow-lg ${
-                  (!isValid || isTradeDeadline || (role !== 'ADMIN' && !propMyTeamId) || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0))
-                    ? 'bg-[#303030] text-[#8e8e93] cursor-not-allowed opacity-70'
-                    : 'bg-[#3390ec] hover:bg-[#2b7bc4] text-white active:scale-[0.98] shadow-[#3390ec]/25 cursor-pointer'
-                }`}
-              >
-                <span>🚀 {isTradeDeadline ? 'Обмены заморожены (Дедлайн)' : (role !== 'ADMIN' && !propMyTeamId) ? 'Только для менеджеров команд' : 'Отправить предложение обмена'}</span>
-              </button>
+            {/* Partner Team */}
+            <div className="flex flex-col gap-2">
+              <div className="bg-[#212121] p-2 rounded-xl border border-[#303030]">
+                <select 
+                  value={partnerTeamId} 
+                  onChange={e => setPartnerTeamId(e.target.value)} 
+                  className="w-full bg-[#181818] border border-[#303030] p-2 rounded-lg text-white font-bold text-[12px] outline-none"
+                >
+                  {safeTeamsArray.filter((t: any) => t.id !== effectiveMyTeamId).map((t: any) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                <div className="text-[10px] text-[#8e8e93] mt-1 text-center font-semibold">
+                  Платежка: {formatMoney(partnerCurrentCap)}
+                </div>
+              </div>
+
+              <div className="h-[240px] overflow-y-auto space-y-1 pr-1 bg-[#181818] p-1.5 rounded-xl border border-[#303030]">
+                {(partnerTeam?.players || []).map((p: any) => {
+                  const restricted = p.is_trade_restricted;
+                  return (
+                    <div 
+                      key={p.id} 
+                      onClick={() => !isTradeDeadline && !restricted && toggleSet(selectedPartnerPlayers, p.id, setSelectedPartnerPlayers)} 
+                      className={`p-2 rounded-lg border text-[12px] transition-colors ${(isTradeDeadline || restricted) ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPlayers.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
+                    >
+                      <div className="font-bold">{restricted && '🔒 '}{p.name}</div>
+                      <div className="text-[#8e8e93] text-[11px]">{formatMoney(p.salary)}</div>
+                    </div>
+                  );
+                })}
+                {(partnerTeam?.draft_picks || partnerTeam?.picks || []).map((p: any) => (
+                  <div 
+                    key={p.id} 
+                    onClick={() => !isTradeDeadline && toggleSet(selectedPartnerPicks, p.id, setSelectedPartnerPicks)} 
+                    className={`p-2 rounded-lg border text-[12px] transition-colors ${isTradeDeadline ? 'cursor-not-allowed opacity-50 bg-[#212121] border-transparent' : 'cursor-pointer'} ${selectedPartnerPicks.has(p.id) ? 'bg-[#3390ec]/20 border-[#3390ec]' : 'bg-[#212121] border-transparent hover:bg-[#252525]'}`}
+                  >
+                    <div className="font-bold">🎟 {p.year}: {p.name}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        )}
+
+          {/* 2) Блок сводки зарплат («Уходит $ / Приходит $», финансовая валидация) */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* My Team Summary */}
+            <div className="bg-[#212121] p-3 rounded-2xl border border-[#303030] text-center space-y-1.5 shadow-sm">
+              <div className="text-[12px] font-extrabold text-white truncate">{myTeam?.name || 'Моя команда'}</div>
+              <div className="flex justify-between text-[11px] px-1">
+                <span className="text-[#8e8e93]">Уходит:</span>
+                <span className="font-bold text-[#ff3b30]">{formatMoney(myOutgoingSalary)}</span>
+              </div>
+              <div className="flex justify-between text-[11px] px-1">
+                <span className="text-[#8e8e93]">Приходит:</span>
+                <span className="font-bold text-[#34c759]">{formatMoney(myIncomingSalary)}</span>
+              </div>
+              <div className="pt-1 flex justify-center">
+                {myValidation.valid ? (
+                  <span className="flex items-center gap-1 text-[11px] text-[#34c759] font-bold">
+                    <CheckCircle2 width="16" height="16" /> По правилам CBA
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#ff3b30] font-bold leading-tight">
+                    {myValidation.err}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Partner Team Summary */}
+            <div className="bg-[#212121] p-3 rounded-2xl border border-[#303030] text-center space-y-1.5 shadow-sm">
+              <div className="text-[12px] font-extrabold text-white truncate">{partnerTeam?.name || 'Партнер'}</div>
+              <div className="flex justify-between text-[11px] px-1">
+                <span className="text-[#8e8e93]">Уходит:</span>
+                <span className="font-bold text-[#ff3b30]">{formatMoney(partnerOutgoingSalary)}</span>
+              </div>
+              <div className="flex justify-between text-[11px] px-1">
+                <span className="text-[#8e8e93]">Приходит:</span>
+                <span className="font-bold text-[#34c759]">{formatMoney(partnerIncomingSalary)}</span>
+              </div>
+              <div className="pt-1 flex justify-center">
+                {partnerValidation.valid ? (
+                  <span className="flex items-center gap-1 text-[11px] text-[#34c759] font-bold">
+                    <CheckCircle2 width="16" height="16" /> По правилам CBA
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#ff3b30] font-bold leading-tight">
+                    {partnerValidation.err}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 3) Поле ввода комментария («Комментарий к офферу») */}
+          <div className="bg-[#212121] p-3.5 rounded-2xl border border-[#303030] space-y-2">
+            <label className="text-[12px] font-bold text-[#8e8e93] flex items-center gap-1.5">
+              <span>💬</span>
+              <span>Комментарий к офферу</span>
+            </label>
+            <textarea 
+              value={message} 
+              onChange={e => setMessage(e.target.value)}
+              placeholder="Опишите детали или условия предложения (опционально)..."
+              disabled={isTradeDeadline}
+              className="w-full p-2.5 bg-[#181818] border border-[#303030] rounded-xl text-[12px] text-white outline-none focus:border-[#3390ec] resize-none h-[64px] disabled:opacity-50"
+            />
+          </div>
+
+          {/* 4) Кнопка «🚀 Отправить предложение обмена» */}
+          <button 
+            onClick={handleSendOffer}
+            disabled={!isValid || isTradeDeadline || (role !== 'ADMIN' && !propMyTeamId) || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0)}
+            className={`w-full py-3.5 rounded-xl font-black text-[13px] transition-all flex items-center justify-center gap-2 shadow-lg ${
+              (!isValid || isTradeDeadline || (role !== 'ADMIN' && !propMyTeamId) || (selectedMyPlayers.size===0 && selectedPartnerPlayers.size===0 && selectedMyPicks.size===0 && selectedPartnerPicks.size===0))
+                ? 'bg-[#303030] text-[#8e8e93] cursor-not-allowed opacity-70'
+                : 'bg-[#3390ec] hover:bg-[#2b7bc4] text-white active:scale-[0.98] shadow-[#3390ec]/25 cursor-pointer'
+            }`}
+          >
+            <span>🚀 {isTradeDeadline ? 'Обмены заморожены (Дедлайн)' : (role !== 'ADMIN' && !propMyTeamId) ? 'Только для менеджеров команд' : 'Отправить предложение обмена'}</span>
+          </button>
+        </div>
+      )}
 
         {subTab === 'OFFERS' && (
           <div className="space-y-4">
@@ -454,7 +490,6 @@ export default function TradeMachineTab({ role = 'PLAYER', myTeamId: propMyTeamI
             )}
           </div>
         )}
-      </div>
     </div>
   );
 }

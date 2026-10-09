@@ -30,7 +30,7 @@ export default function DraftTab({ role, myTeamId }: { role: string, myTeamId?: 
       const boardData = await boardRes.json();
       const propsData = await propsRes.json();
 
-      setBoard(boardData.picks || []);
+      setBoard((boardData.picks || []).slice(0, 30));
       setSettings(boardData.settings || null);
       setProspects(Array.isArray(propsData) ? propsData : []);
     } catch (e) {

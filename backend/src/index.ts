@@ -19,6 +19,20 @@ fastify.register(cors, {
   origin: true,
 });
 
+// Support requests without Content-Type or empty body to prevent HTTP 415
+fastify.addContentTypeParser('*', function (request, payload, done) {
+  let data = '';
+  payload.on('data', chunk => { data += chunk; });
+  payload.on('end', () => {
+    if (!data || data.length === 0) return done(null, {});
+    try {
+      done(null, JSON.parse(data));
+    } catch {
+      done(null, data);
+    }
+  });
+});
+
 fastify.get('/', async (request, reply) => {
   return { hello: 'NBA2K TMA API' };
 });
@@ -187,6 +201,50 @@ const adminAssignTeamHandler = async (request: any, reply: any) => {
 
 fastify.post('/admin/users/assign-team', adminAssignTeamHandler);
 fastify.post('/api/admin/users/assign-team', adminAssignTeamHandler);
+
+const adminSetUserRoleHandler = async (request: any, reply: any) => {
+  if (!checkAdmin(request, reply)) return;
+
+  const { target_user_id, user_id, role } = request.body || {};
+  const rawId = target_user_id || user_id;
+  if (!rawId) {
+    return reply.status(400).send({ error: 'Параметр target_user_id обязателен' });
+  }
+
+  const parsedUserId = Number(rawId);
+  const targetRole = String(role || '').toUpperCase();
+  if (targetRole !== 'ADMIN' && targetRole !== 'USER') {
+    return reply.status(400).send({ error: 'Недопустимая роль. Допустимы: ADMIN или USER' });
+  }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: parsedUserId } });
+  if (!targetUser) {
+    return reply.status(404).send({ error: 'Пользователь не найден' });
+  }
+
+  // Protection: cannot revoke admin rights from the league creator
+  const creatorUsername = (process.env.ADMIN_USERNAME || 'smthing69else').replace('@', '').toLowerCase();
+  if (targetUser.username?.toLowerCase() === creatorUsername && targetRole !== 'ADMIN') {
+    return reply.status(403).send({ error: `Нельзя отозвать права администратора у создателя лиги (@${targetUser.username})` });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: parsedUserId },
+    data: { role: targetRole },
+    include: { team: true }
+  });
+
+  return {
+    success: true,
+    user: {
+      ...updatedUser,
+      telegram_id: Number(updatedUser.telegram_id)
+    }
+  };
+};
+
+fastify.post('/admin/users/set-role', adminSetUserRoleHandler);
+fastify.post('/api/admin/users/set-role', adminSetUserRoleHandler);
 
 
 fastify.get('/league/settings', async (request, reply) => {
@@ -663,7 +721,7 @@ fastify.post('/admin/season/advance-year', async (request, reply) => {
 });
 
 // Draft API
-fastify.get('/draft/board', async (request, reply) => {
+const getDraftBoardHandler = async (request: any, reply: any) => {
   const settings = await prisma.leagueSettings.findUnique({ where: { id: 1 } });
   
   const allPicks = await prisma.draftPick.findMany({
@@ -676,7 +734,10 @@ fastify.get('/draft/board', async (request, reply) => {
     }
   });
 
-  const picks = allPicks.map((p, idx) => ({
+  // Strictly 30 picks for Round 1
+  const round1Picks = allPicks.slice(0, 30);
+
+  const picks = round1Picks.map((p, idx) => ({
     ...p,
     pick_number: idx + 1,
     team: {
@@ -699,7 +760,10 @@ fastify.get('/draft/board', async (request, reply) => {
     settings,
     current_pick_index: currentPickIndex
   };
-});
+};
+
+fastify.get('/draft/board', getDraftBoardHandler);
+fastify.get('/api/draft/board', getDraftBoardHandler);
 
 fastify.get('/draft/prospects', async (request, reply) => {
   return await prisma.player.findMany({ where: { is_prospect: true, team_id: null }, orderBy: { overall_rating: 'desc' } });
@@ -859,9 +923,9 @@ const draftPickHandler = async (request: any, reply: any) => {
   });
 
   // Индекс current_draft_pick_index увеличивается на 1 (ход переходит дальше)
-  const allPicksCount = await prisma.draftPick.count();
+  const round1Count = 30;
   const nextIndex = settings.current_draft_pick_index + 1;
-  const isCompleted = nextIndex >= allPicksCount;
+  const isCompleted = nextIndex >= round1Count;
 
   const updatedSettings = await prisma.leagueSettings.update({
     where: { id: 1 },
@@ -871,7 +935,7 @@ const draftPickHandler = async (request: any, reply: any) => {
     }
   });
 
-  // Возвращать обновленное состояние доски
+  // Возвращать обновленное состояние доски (ровно 30 слотов)
   const allUpdatedPicks = await prisma.draftPick.findMany({
     orderBy: [{ year: 'asc' }, { id: 'asc' }],
     include: {
@@ -882,7 +946,7 @@ const draftPickHandler = async (request: any, reply: any) => {
     }
   });
 
-  const picks = allUpdatedPicks.map((p, idx) => ({
+  const picks = allUpdatedPicks.slice(0, 30).map((p, idx) => ({
     ...p,
     pick_number: idx + 1,
     team: {
@@ -917,26 +981,61 @@ fastify.get('/free-agency/players', async (request, reply) => {
   });
 });
 
-fastify.get('/admin/free-agency/unassigned-players', async (request, reply) => {
+const getUnassignedPlayersHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
-  return await prisma.player.findMany({
-    where: { team_id: null, is_prospect: false, fa_block_id: null },
-    orderBy: { overall_rating: 'desc' }
-  });
-});
-
-fastify.post('/admin/free-agency/blocks', async (request, reply) => {
-  if (!checkAdmin(request, reply)) return;
-  const block = await prisma.$transaction(async (tx) => {
-    const count = await tx.faBlock.count();
-    return await tx.faBlock.create({
-      data: { number: count + 1 }
+  try {
+    const players = await prisma.player.findMany({
+      where: { team_id: null, is_prospect: false, fa_block_id: null },
+      orderBy: { overall_rating: 'desc' }
     });
-  });
-  return block;
-});
+    return players;
+  } catch (error) {
+    console.error('Error fetching unassigned players:', error);
+    return reply.status(500).send({ error: 'Ошибка получения свободных агентов' });
+  }
+};
 
-fastify.delete('/admin/free-agency/blocks/:blockId', async (request, reply) => {
+fastify.get('/admin/free-agency/unassigned-players', getUnassignedPlayersHandler);
+fastify.get('/api/admin/free-agency/unassigned-players', getUnassignedPlayersHandler);
+
+const createFaBlockHandler = async (request: any, reply: any) => {
+  if (!checkAdmin(request, reply)) return;
+  try {
+    let body = request.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch {}
+    }
+    const { duration_minutes } = (body as any) || {};
+    const duration = Number(duration_minutes) || 30;
+
+    const count = await prisma.faBlock.count();
+    const newBlockNumber = count + 1;
+
+    const newBlock = await prisma.faBlock.create({
+      data: {
+        number: newBlockNumber,
+        status: 'PENDING'
+      }
+    });
+
+    const blockResponse = {
+      ...newBlock,
+      block_number: newBlock.number,
+      duration_minutes: duration
+    };
+
+    console.log(`>>> [FA_BLOCK_CREATE] Создан блок #${newBlockNumber} (id: ${newBlock.id}), duration: ${duration} мин.`);
+    return reply.status(201).send({ success: true, block: blockResponse });
+  } catch (error) {
+    console.error('>>> [FA_BLOCK_CREATE_ERROR] Ошибка при создании блока:', error);
+    return reply.status(500).send({ error: 'Ошибка при создании блока свободных агентов' });
+  }
+};
+
+fastify.post('/admin/free-agency/blocks', createFaBlockHandler);
+fastify.post('/api/admin/free-agency/blocks', createFaBlockHandler);
+
+const deleteBlockHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
   const { blockId } = request.params as any;
   const id = parseInt(blockId);
@@ -961,9 +1060,12 @@ fastify.delete('/admin/free-agency/blocks/:blockId', async (request, reply) => {
     return await tx.faBlock.findMany({ orderBy: { number: 'asc' } });
   });
   return updatedBlocks;
-});
+};
 
-fastify.post('/admin/free-agency/blocks/:blockId/add-player', async (request, reply) => {
+fastify.delete('/admin/free-agency/blocks/:blockId', deleteBlockHandler);
+fastify.delete('/api/admin/free-agency/blocks/:blockId', deleteBlockHandler);
+
+const addPlayerHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
   const { blockId } = request.params as any;
   const { player_id } = request.body as any;
@@ -972,9 +1074,12 @@ fastify.post('/admin/free-agency/blocks/:blockId/add-player', async (request, re
     data: { fa_block_id: parseInt(blockId) }
   });
   return { success: true };
-});
+};
 
-fastify.post('/admin/free-agency/blocks/:blockId/remove-player', async (request, reply) => {
+fastify.post('/admin/free-agency/blocks/:blockId/add-player', addPlayerHandler);
+fastify.post('/api/admin/free-agency/blocks/:blockId/add-player', addPlayerHandler);
+
+const removePlayerHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
   const { player_id } = request.body as any;
   await prisma.player.update({
@@ -982,12 +1087,15 @@ fastify.post('/admin/free-agency/blocks/:blockId/remove-player', async (request,
     data: { fa_block_id: null }
   });
   return { success: true };
-});
+};
 
-fastify.post('/admin/free-agency/blocks/:blockId/start', async (request, reply) => {
+fastify.post('/admin/free-agency/blocks/:blockId/remove-player', removePlayerHandler);
+fastify.post('/api/admin/free-agency/blocks/:blockId/remove-player', removePlayerHandler);
+
+const startBlockHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
   const { blockId } = request.params as any;
-  const { days = 0, minutes = 30 } = request.body as any;
+  const { days = 0, minutes = 30 } = (request.body as any) || {};
   
   const block = await prisma.faBlock.findUnique({ where: { id: parseInt(blockId) } });
   if (!block) return reply.status(404).send({ error: 'Block not found' });
@@ -1013,9 +1121,22 @@ fastify.post('/admin/free-agency/blocks/:blockId/start', async (request, reply) 
   });
   
   return { success: true };
-});
+};
 
-fastify.get('/free-agency/blocks', async (request, reply) => {
+fastify.post('/admin/free-agency/blocks/:blockId/start', startBlockHandler);
+fastify.post('/api/admin/free-agency/blocks/:blockId/start', startBlockHandler);
+
+const getOfferEvaluationAmount = (offer: any) => {
+  if (typeof offer.evaluation_amount === 'number' && offer.evaluation_amount > 0) {
+    return offer.evaluation_amount;
+  }
+  const salaries = offer.salaries && offer.salaries.length > 0 
+    ? offer.salaries 
+    : Array(offer.years || 1).fill(offer.annual_salary || 0);
+  return salaries.slice(0, 4).reduce((sum: number, val: number) => sum + Number(val || 0), 0);
+};
+
+const getFaBlocksHandler = async (request: any, reply: any) => {
   const role = request.headers['x-user-role'];
   const blocks = await prisma.faBlock.findMany({ orderBy: { number: 'asc' } });
   
@@ -1034,9 +1155,12 @@ fastify.get('/free-agency/blocks', async (request, reply) => {
       is_completed: b.status === 'COMPLETED'
     }));
   }
-});
+};
 
-fastify.get('/free-agency/blocks/:blockId', async (request, reply) => {
+fastify.get('/free-agency/blocks', getFaBlocksHandler);
+fastify.get('/api/free-agency/blocks', getFaBlocksHandler);
+
+const getFaBlockByIdHandler = async (request: any, reply: any) => {
   const { blockId } = request.params as any;
   
   const players = await prisma.player.findMany({
@@ -1047,17 +1171,20 @@ fastify.get('/free-agency/blocks/:blockId', async (request, reply) => {
   
   const playersWithSortedOffers = players.map(p => {
     const offers = p.contract_offers.sort((a, b) => {
-      const totalA = a.salaries.length > 0 ? a.salaries.reduce((acc, v) => acc + v, 0) : a.annual_salary * a.years;
-      const totalB = b.salaries.length > 0 ? b.salaries.reduce((acc, v) => acc + v, 0) : b.annual_salary * b.years;
-      return totalB - totalA;
+      const evalA = getOfferEvaluationAmount(a);
+      const evalB = getOfferEvaluationAmount(b);
+      return evalB - evalA;
     });
     return { ...p, contract_offers: offers };
   });
 
   return playersWithSortedOffers;
-});
+};
 
-fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, reply) => {
+fastify.get('/free-agency/blocks/:blockId', getFaBlockByIdHandler);
+fastify.get('/api/free-agency/blocks/:blockId', getFaBlockByIdHandler);
+
+const finalizeBlockHandler = async (request: any, reply: any) => {
   if (!checkAdmin(request, reply)) return;
   const { blockId } = request.params as any;
   
@@ -1076,9 +1203,9 @@ fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, repl
       if (player.contract_offers.length === 0) continue;
       
       const bestOffer = player.contract_offers.sort((a, b) => {
-        const totalA = a.salaries.length > 0 ? a.salaries.reduce((acc, v) => acc + v, 0) : a.annual_salary * a.years;
-        const totalB = b.salaries.length > 0 ? b.salaries.reduce((acc, v) => acc + v, 0) : b.annual_salary * b.years;
-        return totalB - totalA;
+        const evalA = getOfferEvaluationAmount(a);
+        const evalB = getOfferEvaluationAmount(b);
+        return evalB - evalA;
       })[0];
       
       const salaries = bestOffer.salaries.length > 0 ? bestOffer.salaries : Array(bestOffer.years).fill(bestOffer.annual_salary);
@@ -1092,6 +1219,7 @@ fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, repl
           salary: salaries[0],
           salaries,
           contract_years_left: bestOffer.years,
+          option_type: bestOffer.last_year_option || 'NONE',
           is_rfa: false,
           is_trade_restricted: true,
           previous_team_id: null
@@ -1130,10 +1258,13 @@ fastify.post('/admin/free-agency/blocks/:blockId/finalize', async (request, repl
   });
   
   return { success: true };
-});
+};
+
+fastify.post('/admin/free-agency/blocks/:blockId/finalize', finalizeBlockHandler);
+fastify.post('/api/admin/free-agency/blocks/:blockId/finalize', finalizeBlockHandler);
 
 const createFaOfferHandler = async (request: any, reply: any) => {
-  const { player_id, team_id, offer_type, salaries } = request.body as any;
+  const { player_id, team_id, offer_type, salaries, last_year_option } = request.body as any;
   if (!checkUserTeamPermission(request, reply, team_id)) return;
 
   const parsedSalaries = salaries ? salaries.map(Number) : [];
@@ -1165,11 +1296,23 @@ const createFaOfferHandler = async (request: any, reply: any) => {
     return reply.status(400).send({ error: 'Макс. контракт должен быть 4-5 лет' });
   }
 
+  // Calculate evaluation strictly over first 4 years
+  const evalSalaries = parsedSalaries.slice(0, 4);
+  const evaluationAmount = evalSalaries.reduce((sum: number, val: number) => sum + Number(val || 0), 0);
+
+  const cleanLastYearOption = ['NONE', 'PLAYER_OPTION', 'TEAM_OPTION'].includes(last_year_option)
+    ? last_year_option
+    : (offer_type === 'MIN' ? 'PLAYER_OPTION' : 'NONE');
+
   const offer = await prisma.contractOffer.create({
     data: { 
-      player_id, team_id, years, 
+      player_id, 
+      team_id, 
+      years, 
       annual_salary: parsedSalaries[0] || 0,
-      salaries: parsedSalaries
+      salaries: parsedSalaries,
+      last_year_option: cleanLastYearOption,
+      evaluation_amount: evaluationAmount
     }
   });
   return { success: true, offer };
@@ -1198,6 +1341,7 @@ fastify.post('/free-agency/offers/:offerId/match', async (request, reply) => {
           salary: salaries[0],
           salaries,
           contract_years_left: offer.years,
+          option_type: offer.last_year_option || 'NONE',
           is_rfa: false,
           is_trade_restricted: true,
           previous_team_id: null
@@ -1220,6 +1364,7 @@ fastify.post('/free-agency/offers/:offerId/match', async (request, reply) => {
           salary: salaries[0],
           salaries,
           contract_years_left: offer.years,
+          option_type: offer.last_year_option || 'NONE',
           is_rfa: false,
           is_trade_restricted: true,
           previous_team_id: null
@@ -1238,13 +1383,13 @@ fastify.post('/free-agency/offers/:offerId/match', async (request, reply) => {
 fastify.post('/admin/free-agency/finalize/:playerId', async (request, reply) => {
   if (!checkAdmin(request, reply)) return;
   const { playerId } = request.params as any;
-  const offer = await prisma.contractOffer.findFirst({
+  const offers = await prisma.contractOffer.findMany({
     where: { player_id: playerId, status: 'PENDING' },
-    orderBy: { annual_salary: 'desc' },
     include: { player: true, team: true }
   });
   
-  if (!offer) return reply.status(400).send({ error: 'Нет активных предложений' });
+  if (offers.length === 0) return reply.status(400).send({ error: 'Нет активных предложений' });
+  const offer = offers.sort((a, b) => getOfferEvaluationAmount(b) - getOfferEvaluationAmount(a))[0];
   
   const salaries = offer.salaries && offer.salaries.length > 0 ? offer.salaries : Array(offer.years).fill(offer.annual_salary);
   const totalMoney = salaries.reduce((a, b) => a + b, 0);
@@ -1258,6 +1403,7 @@ fastify.post('/admin/free-agency/finalize/:playerId', async (request, reply) => 
         salary: salaries[0],
         salaries,
         contract_years_left: offer.years,
+        option_type: offer.last_year_option || 'NONE',
         is_rfa: false,
         is_trade_restricted: true,
         previous_team_id: null

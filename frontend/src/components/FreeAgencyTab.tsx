@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, BookOpen, Clock, AlertCircle, CheckCircle2, Plus, X } from 'lucide-react';
+import MemoTab from './MemoTab';
 
 type ContractType = 'CUSTOM' | 'MIN' | 'TAX_MLE' | 'FULL_MLE' | 'ROOKIE_MAX' | 'MEDIUM_MAX' | 'VETERAN_MAX' | 'SUPERMAX';
 
@@ -20,6 +21,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const [offerPlayer, setOfferPlayer] = useState<any>(null);
   const [offerType, setOfferType] = useState<ContractType>('CUSTOM');
   const [offerYears, setOfferYears] = useState(1);
+  const [lastYearOption, setLastYearOption] = useState<'NONE' | 'PLAYER_OPTION' | 'TEAM_OPTION'>('NONE');
   const [salariesArr, setSalariesArr] = useState<string[]>(['']);
   
   const [showGuide, setShowGuide] = useState(false);
@@ -114,13 +116,29 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
     if (isCreating) return;
     try {
       setIsCreating(true);
-      await fetch(`/api/admin/free-agency/blocks`, {
+      const res = await fetch(`/api/admin/free-agency/blocks`, {
         method: 'POST',
-        headers: { 'x-user-role': role }
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': role
+        },
+        body: JSON.stringify({ duration_minutes: 30 })
       });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Ошибка при создании блока');
+      }
+
+      if (data.block) {
+        setBlocks(prev => [...prev, data.block]);
+        setActiveBlockId(data.block.id);
+        setMode('BUILDER');
+      }
       await fetchBaseData();
-    } catch (e) {
-      alert('Ошибка');
+      await fetchUnassigned();
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || 'Ошибка');
     } finally {
       setIsCreating(false);
     }
@@ -201,7 +219,11 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
       setLoading(true);
       await fetch(`/api/admin/free-agency/blocks/${id}/finalize`, {
         method: 'POST',
-        headers: { 'x-user-role': role }
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-role': role
+        },
+        body: JSON.stringify({})
       });
       await fetchBaseData();
       await fetchBlockPlayers(id);
@@ -230,26 +252,34 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
 
   useEffect(() => {
     setSalariesArr(prev => {
+      if (prev.length === offerYears) return prev;
       const newArr = [...prev];
       if (newArr.length < offerYears) {
-        while (newArr.length < offerYears) newArr.push('');
+        const schedule = getScheduleForType(offerType);
+        while (newArr.length < offerYears) {
+          const idx = newArr.length;
+          const defaultVal = (offerType !== 'CUSTOM' && schedule && schedule[idx] !== undefined)
+            ? schedule[idx].toString()
+            : '';
+          newArr.push(defaultVal);
+        }
       } else if (newArr.length > offerYears) {
         newArr.length = offerYears;
       }
       return newArr;
     });
-  }, [offerYears]);
+  }, [offerYears, offerType]);
 
   const getScheduleForType = (type: ContractType): number[] => {
     if (!settings) return [];
     switch(type) {
-      case 'MIN': return settings.min_salary_schedule;
-      case 'TAX_MLE': return settings.tax_mle_schedule;
-      case 'FULL_MLE': return settings.full_mle_schedule;
-      case 'ROOKIE_MAX': return settings.rookie_max_schedule;
-      case 'MEDIUM_MAX': return settings.medium_max_schedule;
-      case 'VETERAN_MAX': return settings.veteran_max_schedule;
-      case 'SUPERMAX': return settings.supermax_schedule;
+      case 'MIN': return settings.min_salary_schedule || [1.15, 1.25, 1.35, 1.45, 1.55];
+      case 'TAX_MLE': return settings.tax_mle_schedule || [5.3, 5.6, 5.9];
+      case 'FULL_MLE': return settings.full_mle_schedule || [12.9, 13.6, 14.3, 15.0];
+      case 'ROOKIE_MAX': return settings.rookie_max_schedule || [35.5, 38.3, 41.1, 44.0];
+      case 'MEDIUM_MAX': return settings.medium_max_schedule || [42.5, 45.9, 49.3, 52.7, 56.1];
+      case 'VETERAN_MAX': return settings.veteran_max_schedule || [50.0, 54.0, 58.0, 62.0, 66.0];
+      case 'SUPERMAX': return settings.supermax_schedule || [60.0, 64.8, 69.6, 74.4, 79.2];
       default: return [];
     }
   };
@@ -257,24 +287,53 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   const handleTypeChange = (type: ContractType) => {
     setOfferType(type);
     
-    if (type === 'ROOKIE_MAX') {
-      if (!offerPlayer.is_rfa) {
+    let targetYears = offerYears;
+    let option: 'NONE' | 'PLAYER_OPTION' | 'TEAM_OPTION' = 'NONE';
+
+    if (type === 'MIN') {
+      targetYears = 2; // Fixed 1+1 PO
+      option = 'PLAYER_OPTION';
+    } else if (type === 'TAX_MLE') {
+      targetYears = 2; // Strictly 2 years
+      option = 'NONE';
+    } else if (type === 'FULL_MLE') {
+      targetYears = Math.min(Math.max(offerYears, 1), 4);
+      option = 'NONE';
+    } else if (type === 'ROOKIE_MAX') {
+      if (!offerPlayer?.is_rfa) {
         alert('Детский макс доступен ИСКЛЮЧИТЕЛЬНО для RFA-игроков!');
         setOfferType('CUSTOM');
         return;
       }
-      setOfferYears(4);
+      targetYears = 4;
+      option = 'NONE';
     } else if (type === 'MEDIUM_MAX' || type === 'VETERAN_MAX' || type === 'SUPERMAX') {
-      if (offerYears < 4) setOfferYears(4);
+      targetYears = offerYears === 5 ? 5 : 4;
+      option = 'NONE';
     }
+
+    setOfferYears(targetYears);
+    setLastYearOption(option);
 
     if (type !== 'CUSTOM') {
       const schedule = getScheduleForType(type);
       if (schedule && schedule.length > 0) {
-        const targetYears = type === 'ROOKIE_MAX' ? 4 : (offerYears < 4 && type.includes('MAX') ? 4 : offerYears);
-        setOfferYears(targetYears);
         const newArr = Array(targetYears).fill('');
         for (let i = 0; i < targetYears; i++) {
+          newArr[i] = schedule[i] !== undefined ? schedule[i].toString() : schedule[schedule.length - 1].toString();
+        }
+        setSalariesArr(newArr);
+      }
+    }
+  };
+
+  const handleYearsChange = (y: number) => {
+    setOfferYears(y);
+    if (offerType !== 'CUSTOM') {
+      const schedule = getScheduleForType(offerType);
+      if (schedule && schedule.length > 0) {
+        const newArr = Array(y).fill('');
+        for (let i = 0; i < y; i++) {
           newArr[i] = schedule[i] !== undefined ? schedule[i].toString() : schedule[schedule.length - 1].toString();
         }
         setSalariesArr(newArr);
@@ -289,13 +348,20 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
   };
 
   const availableYears = () => {
+    if (offerType === 'MIN') return [2];
+    if (offerType === 'TAX_MLE') return [2];
+    if (offerType === 'FULL_MLE') return [1, 2, 3, 4];
     if (offerType === 'ROOKIE_MAX') return [4];
     if (offerType === 'MEDIUM_MAX' || offerType === 'VETERAN_MAX' || offerType === 'SUPERMAX') return [4, 5];
     return [1, 2, 3, 4, 5];
   };
 
   const formatMoney = (amount: number) => `$${(amount / 1000000).toFixed(1)}M`;
+  
+  const evalSalaries = salariesArr.slice(0, 4);
+  const evaluationSum = evalSalaries.reduce((sum, val) => sum + (parseFloat(val) || 0), 0) * 1000000;
   const totalOfferSum = salariesArr.reduce((sum, val) => sum + (parseFloat(val) || 0), 0) * 1000000;
+  const fifthYearSalary = offerYears === 5 ? (parseFloat(salariesArr[4]) || 0) * 1000000 : 0;
 
   const submitOffer = async () => {
     if (!offerPlayer || !myTeamId) return;
@@ -311,7 +377,8 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
           player_id: offerPlayer.id,
           team_id: myTeamId,
           offer_type: offerType,
-          salaries: parsedSalaries
+          salaries: parsedSalaries,
+          last_year_option: lastYearOption
         })
       });
       const data = await res.json();
@@ -321,6 +388,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
       setOfferType('CUSTOM');
       setSalariesArr(['']);
       setOfferYears(1);
+      setLastYearOption('NONE');
       if (activeBlockId) await fetchBlockPlayers(activeBlockId);
     } catch (e: any) {
       alert(e.message);
@@ -523,6 +591,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                         const canMatch = isMyRFA && hasOffer && topOffer.status === 'PENDING' && !isExpired && activeBlockData?.is_active;
                         const previousTeamName = teams.find(t => t.id === p.previous_team_id)?.name;
                         const topOfferTotal = topOffer ? (topOffer.salaries?.length > 0 ? topOffer.salaries.reduce((a: number, b: number) => a + b, 0) : topOffer.annual_salary * topOffer.years) : 0;
+                        const topOfferEval = topOffer ? (topOffer.evaluation_amount > 0 ? topOffer.evaluation_amount : (topOffer.salaries?.length > 0 ? topOffer.salaries.slice(0, 4).reduce((a: number, b: number) => a + b, 0) : topOfferTotal)) : 0;
 
                         return (
                           <div key={p.id} className="bg-[#212121] p-4 rounded-2xl shadow-sm border border-[#303030]">
@@ -549,29 +618,76 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                             </div>
 
                             {activeBlockData?.is_completed ? (
-                              <div className="mt-3 p-3 bg-[#181818] rounded-xl border border-[#303030] flex items-center gap-2">
+                              <div className="mt-3 p-3 bg-[#181818] rounded-xl border border-[#303030] flex flex-col gap-1.5">
                                 {p.team ? (
                                   <>
-                                    <CheckCircle2 width="16" height="16" className="text-[#34c759]" />
-                                    <span className="text-[13px] font-bold text-white">
-                                      Подписан в: <span className="text-[#34c759]">{p.team.name}</span> на {formatMoney(p.salaries.reduce((a: number, b: number) => a + b, 0))} / {p.contract_years_left} г.
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <CheckCircle2 width="16" height="16" className="text-[#34c759]" />
+                                      <span className="text-[13px] font-bold text-white">
+                                        Подписан в: <span className="text-[#34c759]">{p.team.name}</span>
+                                      </span>
+                                    </div>
+                                    <div className="text-[12px] text-[#8e8e93] pl-6 flex items-center gap-2 flex-wrap">
+                                      <span>Сумма: {formatMoney(p.salaries?.reduce((a: number, b: number) => a + b, 0) || 0)} / {p.contract_years_left} г.</span>
+                                      {p.option_type === 'PLAYER_OPTION' && (
+                                        <span className="bg-[#3390ec]/20 text-[#3390ec] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                          PO на посл. год
+                                        </span>
+                                      )}
+                                      {p.option_type === 'TEAM_OPTION' && (
+                                        <span className="bg-[#ff9f0a]/20 text-[#ff9f0a] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                          TO на посл. год
+                                        </span>
+                                      )}
+                                    </div>
                                   </>
                                 ) : (
-                                  <>
+                                  <div className="flex items-center gap-2">
                                     <AlertCircle width="16" height="16" className="text-[#8e8e93]" />
                                     <span className="text-[13px] font-bold text-[#8e8e93]">Остался без контракта</span>
-                                  </>
+                                  </div>
                                 )}
                               </div>
                             ) : (
                               <>
                                 {hasOffer && (
-                                  <div className="mt-3 p-3 bg-[#181818] rounded-xl border border-[#303030]">
-                                    <div className="text-[11px] text-[#8e8e93] mb-1">Лидирующее предложение:</div>
-                                    <div className="text-[13px] font-bold text-white">
-                                      {topOffer.team.name} — <span className="text-[#34c759]">{formatMoney(topOfferTotal)}</span> на {topOffer.years} г.
+                                  <div className="mt-3 p-3 bg-[#181818] rounded-xl border border-[#303030] space-y-1.5">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[11px] text-[#8e8e93]">Лидирующее предложение:</span>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {topOffer.last_year_option === 'PLAYER_OPTION' && (
+                                          <span className="bg-[#3390ec]/20 text-[#3390ec] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                            PO на {topOffer.years}-й год
+                                          </span>
+                                        )}
+                                        {topOffer.last_year_option === 'TEAM_OPTION' && (
+                                          <span className="bg-[#ff9f0a]/20 text-[#ff9f0a] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                            TO на {topOffer.years}-й год
+                                          </span>
+                                        )}
+                                        {topOffer.years === 5 && (
+                                          <span className="bg-[#af52de]/20 text-[#af52de] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                            5 лет
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
+                                    <div className="text-[13px] font-bold text-white flex items-baseline justify-between">
+                                      <div>
+                                        <span>{topOffer.team.name}</span>
+                                        <span className="text-[11px] text-[#8e8e93] font-normal ml-1">({topOffer.years} г.)</span>
+                                      </div>
+                                      <div className="text-right">
+                                        <span className="text-[#34c759] font-extrabold">{formatMoney(topOfferEval)}</span>
+                                        <span className="text-[10px] text-[#8e8e93] block font-normal">оценка (первые 4 г.)</span>
+                                      </div>
+                                    </div>
+                                    {topOffer.years === 5 && (
+                                      <div className="text-[10px] text-[#8e8e93] pt-1.5 border-t border-[#303030]/60 flex items-center justify-between">
+                                        <span>Всего: {formatMoney(topOfferTotal)}</span>
+                                        <span className="text-[#af52de]">5-й год ({formatMoney(topOffer.salaries?.[4] || 0)}) — удержание</span>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
@@ -596,6 +712,7 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                                           setOfferType('CUSTOM');
                                           setSalariesArr(['']);
                                           setOfferYears(1);
+                                          setLastYearOption('NONE');
                                         }} 
                                         disabled={!myTeamId || isExpired || !activeBlockData?.is_active}
                                         className={`flex-1 py-2.5 font-bold rounded-xl text-[12px] active:scale-[0.98] transition-colors ${!myTeamId || isExpired || !activeBlockData?.is_active ? 'bg-[#303030] text-[#8e8e93]' : 'bg-[#3390ec]/10 text-[#3390ec]'}`}
@@ -653,20 +770,74 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                   {availableYears().map(y => (
                     <button 
                       key={y} 
-                      onClick={() => setOfferYears(y)} 
+                      type="button"
+                      onClick={() => handleYearsChange(y)} 
                       className={`flex-1 py-2 rounded-lg text-[13px] font-bold transition-colors ${offerYears === y ? 'bg-[#3390ec] text-white' : 'bg-[#181818] border border-[#303030] text-[#8e8e93]'}`}
                     >
-                      {y}
+                      {offerType === 'MIN' ? '2 года (1+1 PO)' : `${y} ${y === 1 ? 'год' : y >= 5 ? 'лет' : 'года'}`}
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Option on the last year */}
+              <div>
+                <label className="text-[12px] font-bold text-[#8e8e93] block mb-1">
+                  Опция на последний ({offerYears}-й) год
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={offerType === 'MIN'}
+                    onClick={() => setLastYearOption('NONE')}
+                    className={`py-2 px-1 rounded-lg text-[11px] font-bold transition-colors ${
+                      lastYearOption === 'NONE'
+                        ? 'bg-[#3390ec] text-white'
+                        : 'bg-[#181818] border border-[#303030] text-[#8e8e93] disabled:opacity-40'
+                    }`}
+                  >
+                    Без опции
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLastYearOption('PLAYER_OPTION')}
+                    className={`py-2 px-1 rounded-lg text-[11px] font-bold transition-colors ${
+                      lastYearOption === 'PLAYER_OPTION'
+                        ? 'bg-[#3390ec] text-white'
+                        : 'bg-[#181818] border border-[#303030] text-[#8e8e93]'
+                    }`}
+                  >
+                    Игрока (PO)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={offerType === 'MIN'}
+                    onClick={() => setLastYearOption('TEAM_OPTION')}
+                    className={`py-2 px-1 rounded-lg text-[11px] font-bold transition-colors ${
+                      lastYearOption === 'TEAM_OPTION'
+                        ? 'bg-[#3390ec] text-white'
+                        : 'bg-[#181818] border border-[#303030] text-[#8e8e93] disabled:opacity-40'
+                    }`}
+                  >
+                    Команды (TO)
+                  </button>
+                </div>
+                {offerType === 'MIN' && (
+                  <div className="text-[10px] text-[#34c759] mt-1 font-medium">
+                    * Минимальный контракт по правилам строго 1+1 PO (Опция игрока на 2-й год)
+                  </div>
+                )}
               </div>
               
               <div className="space-y-2">
                 <label className="text-[12px] font-bold text-[#8e8e93] block mb-1">Зарплата по годам ($M)</label>
                 {salariesArr.map((val, idx) => (
                   <div key={idx} className="flex items-center gap-2">
-                    <span className="text-[12px] text-[#8e8e93] w-12 shrink-0">Год {idx + 1}</span>
+                    <span className="text-[12px] text-[#8e8e93] w-12 shrink-0">
+                      Год {idx + 1}
+                      {idx === offerYears - 1 && lastYearOption === 'PLAYER_OPTION' && ' (PO)'}
+                      {idx === offerYears - 1 && lastYearOption === 'TEAM_OPTION' && ' (TO)'}
+                    </span>
                     <div className="relative flex-1">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                         <DollarSign width="14" height="14" className="text-[#8e8e93]" />
@@ -682,11 +853,32 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
                 ))}
               </div>
 
-              <div className="bg-[#181818] p-3 rounded-xl border border-[#303030] space-y-1">
-                <div className="flex justify-between text-[12px]">
-                  <span className="text-[#8e8e93]">Итоговая сумма:</span>
-                  <span className="font-bold text-white">{formatMoney(totalOfferSum)}</span>
+              <div className="bg-[#181818] p-3.5 rounded-xl border border-[#303030] space-y-2">
+                <div className="flex justify-between items-center text-[13px]">
+                  <span className="text-[#8e8e93] font-bold">Оценочная сумма (первые 4 года):</span>
+                  <span className="font-extrabold text-[#34c759] text-[15px]">{formatMoney(evaluationSum)}</span>
                 </div>
+
+                {offerYears === 5 && (
+                  <>
+                    <div className="flex justify-between items-center text-[12px] pt-1.5 border-t border-[#303030]/60">
+                      <span className="text-[#8e8e93]">Общая сумма (все 5 лет):</span>
+                      <span className="font-bold text-white">{formatMoney(totalOfferSum)}</span>
+                    </div>
+                    <div className="text-[11px] text-[#af52de] bg-[#af52de]/10 border border-[#af52de]/20 p-2 rounded-lg">
+                      ℹ️ 5-й год ({formatMoney(fifthYearSalary)}) — удержание, в торгах не учитывается
+                    </div>
+                  </>
+                )}
+
+                {lastYearOption !== 'NONE' && (
+                  <div className="text-[11px] text-[#3390ec] bg-[#3390ec]/10 border border-[#3390ec]/20 px-2.5 py-1.5 rounded-lg flex items-center justify-between">
+                    <span>Опция на последний год:</span>
+                    <span className="font-bold">
+                      {lastYearOption === 'PLAYER_OPTION' ? `Опция игрока (PO) на ${offerYears}-й год` : `Опция команды (TO) на ${offerYears}-й год`}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -698,42 +890,10 @@ export default function FreeAgencyTab({ role, myTeamId }: { role: string, myTeam
         </div>
       )}
 
-      {showGuide && settings && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-[#212121] border border-[#303030] w-full max-w-2xl rounded-2xl flex flex-col shadow-2xl max-h-[90vh]">
-            <div className="p-4 border-b border-[#303030] flex justify-between items-center">
-              <h2 className="text-lg font-bold text-white">📖 Памятка по контрактам</h2>
-              <button onClick={() => setShowGuide(false)} className="text-[#8e8e93] hover:text-white font-bold text-xl">&times;</button>
-            </div>
-            <div className="p-4 overflow-x-auto">
-              <table className="w-full text-[12px] text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="text-[#8e8e93] border-b border-[#303030]">
-                    <th className="pb-2">Тип</th>
-                    <th className="pb-2">Год 1</th>
-                    <th className="pb-2">Год 2</th>
-                    <th className="pb-2">Год 3</th>
-                    <th className="pb-2">Год 4</th>
-                    <th className="pb-2">Год 5</th>
-                    <th className="pb-2">Ограничения</th>
-                  </tr>
-                </thead>
-                <tbody className="text-white divide-y divide-[#303030]/50">
-                  <tr>
-                    <td className="py-3 font-bold text-[#3390ec]">Детский макс</td>
-                    <td>{settings.rookie_max_schedule[0] || '-'}</td>
-                    <td>{settings.rookie_max_schedule[1] || '-'}</td>
-                    <td>{settings.rookie_max_schedule[2] || '-'}</td>
-                    <td>{settings.rookie_max_schedule[3] || '-'}</td>
-                    <td>-</td>
-                    <td className="text-[#ff3b30] font-bold">Строго 4 года, Только RFA</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div className="p-4 border-t border-[#303030]">
-              <button onClick={() => setShowGuide(false)} className="w-full py-3 bg-[#3390ec] text-white rounded-xl font-bold">Закрыть</button>
-            </div>
+      {showGuide && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-[#181818] border border-[#303030] w-full max-w-2xl h-[90vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
+            <MemoTab settings={settings} onClose={() => setShowGuide(false)} />
           </div>
         </div>
       )}
